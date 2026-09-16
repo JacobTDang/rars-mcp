@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rars": {
+      "command": "docker",
+      "args": ["exec", "-i", "rars-mcp", "node", "dist/src/stdio-proxy.js"]
+    }
+  }
+}
