@@ -38,6 +38,20 @@ export const modifySchema = z.object({
     address: z.string(), value: z.string(), width: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]),
   })).optional(),
 });
+export const liveConnectSchema = z.object({});
+const liveDebugCommand = z.discriminatedUnion('action', [
+  z.object({ action: z.enum(['step', 'backstep', 'continue', 'pause', 'reset', 'terminate']) }),
+  z.object({ action: z.enum(['breakpoint_add', 'breakpoint_remove']), address: z.string() }),
+]);
+export const liveCommandSchema = z.object({
+  sessionId: z.string().uuid(),
+  command: z.union([
+    liveDebugCommand,
+    z.object({ action: z.literal('load'), files: z.array(z.string()).min(1), programArgs: z.array(z.string()).optional(), stdin: z.string().optional(), conflictPolicy: z.enum(['reject', 'discard']).default('reject') }),
+    z.object({ action: z.literal('inspect'), registers: z.array(z.string()).optional(), memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional() }),
+    z.object({ action: z.literal('modify'), registers: z.record(z.string(), z.string()).optional(), memory: z.array(z.object({ address: z.string(), value: z.string(), width: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional() }),
+  ]),
+});
 
 export type AssembleInput = z.infer<typeof assembleSchema>;
 export type RunInput = z.infer<typeof runSchema>;
@@ -46,3 +60,4 @@ export type DebugStartInput = z.infer<typeof debugStartSchema>;
 export type DebugCommandInput = z.infer<typeof debugCommandSchema>;
 export type InspectInput = z.infer<typeof inspectSchema>;
 export type ModifyInput = z.infer<typeof modifySchema>;
+export type LiveCommandInput = z.infer<typeof liveCommandSchema>;

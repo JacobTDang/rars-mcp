@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
-import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, modifySchema, runSchema } from './tools/schemas.js';
+import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
@@ -38,5 +38,11 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('rars_modify', {
     description: 'Write registers or bounded memory in a RARS session.', inputSchema: modifySchema,
   }, handlers.modify);
+  server.registerTool('rars_live_connect', {
+    description: 'Discover and authenticate with the visible MCP-enabled RARS desktop session.', inputSchema: liveConnectSchema,
+  }, handlers.liveConnect);
+  server.registerTool('rars_live_command', {
+    description: 'Load, inspect, modify, or drive the visible RARS desktop session. This mutates the open GUI.', inputSchema: liveCommandSchema,
+  }, handlers.liveCommand);
   return server;
 }

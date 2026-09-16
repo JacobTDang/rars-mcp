@@ -4,7 +4,9 @@ import { parseDiagnostics } from '../rars/diagnostics.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { Workspace } from '../workspace.js';
 import { HeadlessSession } from '../sessions/headless.js';
-import type { AssembleInput, CloseSessionInput, DebugCommandInput, DebugStartInput, InspectInput, ModifyInput, RunInput } from './schemas.js';
+import { LiveClient } from '../live/client.js';
+import { discoverLiveSession } from '../live/discovery.js';
+import type { AssembleInput, CloseSessionInput, DebugCommandInput, DebugStartInput, InspectInput, LiveCommandInput, ModifyInput, RunInput } from './schemas.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -16,6 +18,8 @@ export interface ToolDependencies {
   maxOutputBytes: number;
   bridgeJar?: string;
   bridgeToken?: string;
+  bridgeHost?: string;
+  liveDiscoveryDir?: string;
 }
 
 export type ToolResult = CallToolResult;
@@ -102,6 +106,30 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(request.memory === undefined ? {} : { memory: request.memory }),
       });
       return { content: [{ type: 'text', text: `Modified RARS session ${sessionId}` }], structuredContent: state as unknown as Record<string, unknown> };
+    },
+    liveConnect: async (_input: Record<string, never> = {}): Promise<ToolResult> => {
+      if (!deps.liveDiscoveryDir) throw new Error('Live RARS discovery is not configured');
+      const discovered = await discoverLiveSession(deps.liveDiscoveryDir);
+      const backend = await LiveClient.connect({ host: deps.bridgeHost ?? 'host.docker.internal', ...discovered, timeoutMs: deps.timeoutMs });
+      const sessionId = deps.sessions.add(backend);
+      return { content: [{ type: 'text', text: `Connected live RARS session ${sessionId}` }], structuredContent: { sessionId, kind: 'live', state: 'ready' } };
+    },
+    liveCommand: async (input: LiveCommandInput): Promise<ToolResult> => {
+      const backend = deps.sessions.get(input.sessionId);
+      const command = input.command;
+      let result: unknown;
+      if (command.action === 'load') {
+        if (!(backend instanceof LiveClient)) throw new Error('Session is not a live RARS session');
+        const files = await Promise.all(command.files.map((file) => deps.workspace.resolve(file)));
+        result = await backend.load({ files, conflictPolicy: command.conflictPolicy, ...(command.programArgs === undefined ? {} : { programArgs: command.programArgs }), ...(command.stdin === undefined ? {} : { stdin: command.stdin }) });
+      } else if (command.action === 'inspect') {
+        result = await backend.inspect({ ...(command.registers === undefined ? {} : { registers: command.registers }), ...(command.memory === undefined ? {} : { memory: command.memory }) });
+      } else if (command.action === 'modify') {
+        result = await backend.modify({ ...(command.registers === undefined ? {} : { registers: command.registers }), ...(command.memory === undefined ? {} : { memory: command.memory }) });
+      } else {
+        result = await backend.command(command);
+      }
+      return { content: [{ type: 'text', text: `Applied ${command.action} to visible RARS session ${input.sessionId}` }], structuredContent: result as Record<string, unknown> };
     },
   };
 }
