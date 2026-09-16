@@ -9,6 +9,8 @@ export interface AppConfig {
   maxOutputBytes: number;
   maxInspectionBytes: number;
   bridgeHost: string;
+  bridgeJar: string;
+  liveDiscoveryDir: string;
   bridgeToken?: string;
 }
 
@@ -42,6 +44,8 @@ export function loadConfig(env: Environment = process.env): AppConfig {
     maxOutputBytes: positiveInteger(env, 'RARS_MAX_OUTPUT_BYTES', 1_048_576),
     maxInspectionBytes: positiveInteger(env, 'RARS_MAX_INSPECTION_BYTES', 65_536),
     bridgeHost: env.RARS_BRIDGE_HOST ?? 'host.docker.internal',
+    bridgeJar: resolve(env.RARS_BRIDGE_JAR ?? '/opt/rars/rars-mcp-bridge.jar'),
+    liveDiscoveryDir: resolve(env.RARS_LIVE_DISCOVERY_DIR ?? '.runtime'),
     ...(bridgeToken === undefined ? {} : { bridgeToken }),
   };
 }

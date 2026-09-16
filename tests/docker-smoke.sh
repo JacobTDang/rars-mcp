@@ -4,6 +4,8 @@ cleanup() { docker compose down; }
 trap cleanup EXIT INT TERM
 mkdir -p workspace
 cp tests/fixtures/hello.asm workspace/hello.asm
+cp tests/fixtures/debug.asm workspace/debug.asm
+mkdir -p .runtime
 docker compose up -d --build
 attempt=0
 until curl -fsS http://127.0.0.1:3000/health >/dev/null; do

@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -eu
 project_dir="${0:A:h:h}"
-runtime_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/rars-mcp-$UID"
+runtime_dir="$project_dir/.runtime"
 mkdir -p "$runtime_dir"
 chmod 700 "$runtime_dir"
 token_file="$runtime_dir/token"

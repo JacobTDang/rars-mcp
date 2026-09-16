@@ -27,10 +27,21 @@ Ready-to-copy examples are in `examples/clients/`.
 - `rars_session_list`: list stateful headless and live sessions.
 - `rars_session_close`: close or disconnect a session.
 
-Stateful debugging and visible desktop synchronization are implemented in the next project milestone.
+- `rars_debug_start`, `rars_debug_command`, `rars_inspect`, `rars_modify`: control isolated stateful debuggers.
+- `rars_live_connect`, `rars_live_command`: connect to and drive the visible desktop RARS session.
+
+## Stateful and desktop debugging
+
+The Docker image includes the Java bridge used by isolated debugger sessions. To synchronize a visible RARS application, run:
+
+```sh
+./scripts/launch-rars-mcp.command
+```
+
+The launcher opens RARS and creates protected discovery files in the ignored `.runtime/` directory. Call `rars_live_connect`, then use its session ID with `rars_live_command`. See `docs/live-session.md` for commands and unsaved-buffer behavior.
 
 ## Operations
 
 View logs with `docker compose logs -f`. Stop with `docker compose down`. Change bounded execution defaults in `compose.yaml`. Rebuild after an update with `docker compose build --no-cache && docker compose up -d`.
 
-See `docs/security.md` before changing network bindings or workspace mounts.
+See `docs/security.md` before changing network bindings or workspace mounts, and `docs/troubleshooting.md` for recovery steps.

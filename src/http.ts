@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 
@@ -17,14 +19,16 @@ export interface HttpHandler {
 
 export function createHttpHandler(dependencies: ToolDependencies): HttpHandler {
   const mcp = createMcpHandler(() => createMcpServer(dependencies), { legacy: 'stateless' });
+  const liveAvailable = () => Boolean(dependencies.liveDiscoveryDir &&
+    existsSync(join(dependencies.liveDiscoveryDir, 'token')) && existsSync(join(dependencies.liveDiscoveryDir, 'port')));
   return {
     async fetch(request: Request): Promise<Response> {
       const pathname = new URL(request.url).pathname;
       if (request.method === 'GET' && pathname === '/health') {
-        return Response.json({ status: 'ok', rars: { jar: dependencies.rarsJar }, liveBridge: 'disconnected' });
+        return Response.json({ status: 'ok', rars: { jar: dependencies.rarsJar }, liveBridge: liveAvailable() ? 'available' : 'disconnected' });
       }
       if (request.method === 'GET' && pathname === '/capabilities') {
-        return Response.json({ headless: true, live: false, transports: ['streamable-http', 'stdio-proxy'] });
+        return Response.json({ headless: true, statefulDebugging: Boolean(dependencies.bridgeJar), live: liveAvailable(), transports: ['streamable-http', 'stdio-proxy'] });
       }
       if (pathname !== '/mcp') return new Response('Not found', { status: 404 });
       return mcp.fetch(request);
@@ -45,6 +49,10 @@ async function main(): Promise<void> {
     rarsJar: config.rarsJar,
     timeoutMs: config.executionTimeoutMs,
     maxOutputBytes: config.maxOutputBytes,
+    bridgeJar: config.bridgeJar,
+    bridgeToken: process.env.RARS_HEADLESS_BRIDGE_TOKEN ?? 'internal-headless-bridge',
+    bridgeHost: config.bridgeHost,
+    liveDiscoveryDir: config.liveDiscoveryDir,
   });
   const nodeHandler = toNodeHandler(handler);
   const port = Number(process.env.PORT ?? '3000');

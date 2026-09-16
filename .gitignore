@@ -4,5 +4,7 @@ dist/
 coverage/
 .env
 workspace/
+.runtime/
+java/bridge/build/
 *.log
 .DS_Store

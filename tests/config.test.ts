@@ -15,6 +15,7 @@ describe('loadConfig', () => {
       maxOutputBytes: 1_048_576,
       maxInspectionBytes: 65_536,
       bridgeHost: 'host.docker.internal',
+      bridgeJar: '/opt/rars/rars-mcp-bridge.jar',
     });
   });
 

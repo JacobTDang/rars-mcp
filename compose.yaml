@@ -7,10 +7,14 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - ./workspace:/workspace
+      - ./.runtime:/run/rars-mcp:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       RARS_EXECUTION_TIMEOUT_MS: "10000"
       RARS_MAX_OUTPUT_BYTES: "1048576"
       RARS_MAX_INSPECTION_BYTES: "65536"
+      RARS_BRIDGE_HOST: "host.docker.internal"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
       interval: 5s
