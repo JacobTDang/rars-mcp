@@ -18,6 +18,8 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "fast-glob": "^3.3.3",
+    "yaml": "^2.8.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
