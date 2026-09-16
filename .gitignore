@@ -5,6 +5,7 @@ coverage/
 .env
 workspace/
 .runtime/
+.worktrees/
 java/bridge/build/
 *.log
 .DS_Store
