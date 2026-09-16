@@ -16,7 +16,33 @@ export const runSchema = z.object({
 
 export const closeSessionSchema = z.object({ sessionId: z.string().uuid() });
 export const emptySchema = z.object({});
+export const debugStartSchema = z.object({
+  files: z.array(z.string().min(1)).min(1),
+  programArgs: z.array(z.string()).optional(),
+  stdin: z.string().optional(),
+});
+export const debugCommandSchema = z.discriminatedUnion('action', [
+  z.object({ sessionId: z.string().uuid(), action: z.enum(['step', 'backstep', 'continue', 'pause', 'reset', 'terminate']) }),
+  z.object({ sessionId: z.string().uuid(), action: z.enum(['breakpoint_add', 'breakpoint_remove']), address: z.string() }),
+]);
+export const inspectSchema = z.object({
+  sessionId: z.string().uuid(),
+  registers: z.array(z.string()).optional(),
+  memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional(),
+  includeSymbols: z.boolean().optional(),
+});
+export const modifySchema = z.object({
+  sessionId: z.string().uuid(),
+  registers: z.record(z.string(), z.string()).optional(),
+  memory: z.array(z.object({
+    address: z.string(), value: z.string(), width: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]),
+  })).optional(),
+});
 
 export type AssembleInput = z.infer<typeof assembleSchema>;
 export type RunInput = z.infer<typeof runSchema>;
 export type CloseSessionInput = z.infer<typeof closeSessionSchema>;
+export type DebugStartInput = z.infer<typeof debugStartSchema>;
+export type DebugCommandInput = z.infer<typeof debugCommandSchema>;
+export type InspectInput = z.infer<typeof inspectSchema>;
+export type ModifyInput = z.infer<typeof modifySchema>;

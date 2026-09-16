@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
-import { assembleSchema, closeSessionSchema, emptySchema, runSchema } from './tools/schemas.js';
+import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, modifySchema, runSchema } from './tools/schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
@@ -26,5 +26,17 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Close an isolated session or disconnect a live RARS session.',
     inputSchema: closeSessionSchema,
   }, handlers.sessionClose);
+  server.registerTool('rars_debug_start', {
+    description: 'Start an isolated stateful RARS debugger session for workspace files.', inputSchema: debugStartSchema,
+  }, handlers.debugStart);
+  server.registerTool('rars_debug_command', {
+    description: 'Step, backstep, continue, pause, reset, terminate, or manage breakpoints.', inputSchema: debugCommandSchema,
+  }, handlers.debugCommand);
+  server.registerTool('rars_inspect', {
+    description: 'Inspect registers, bounded memory, output, and state in a RARS session.', inputSchema: inspectSchema,
+  }, handlers.inspect);
+  server.registerTool('rars_modify', {
+    description: 'Write registers or bounded memory in a RARS session.', inputSchema: modifySchema,
+  }, handlers.modify);
   return server;
 }

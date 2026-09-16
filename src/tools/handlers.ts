@@ -3,7 +3,8 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { Workspace } from '../workspace.js';
-import type { AssembleInput, CloseSessionInput, RunInput } from './schemas.js';
+import { HeadlessSession } from '../sessions/headless.js';
+import type { AssembleInput, CloseSessionInput, DebugCommandInput, DebugStartInput, InspectInput, ModifyInput, RunInput } from './schemas.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -13,6 +14,8 @@ export interface ToolDependencies {
   rarsJar: string;
   timeoutMs: number;
   maxOutputBytes: number;
+  bridgeJar?: string;
+  bridgeToken?: string;
 }
 
 export type ToolResult = CallToolResult;
@@ -64,6 +67,41 @@ export function createToolHandlers(deps: ToolDependencies) {
         content: [{ type: 'text', text: `Closed RARS session ${input.sessionId}` }],
         structuredContent: { sessionId: input.sessionId, closed: true },
       };
+    },
+    debugStart: async (input: DebugStartInput): Promise<ToolResult> => {
+      if (!deps.bridgeJar || !deps.bridgeToken) throw new Error('Stateful RARS bridge is not configured');
+      const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
+      const backend = await HeadlessSession.create({
+        javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
+        token: deps.bridgeToken, files,
+        ...(input.programArgs === undefined ? {} : { programArgs: input.programArgs }),
+        ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
+        timeoutMs: deps.timeoutMs,
+      });
+      const sessionId = deps.sessions.add(backend);
+      return { content: [{ type: 'text', text: `Started RARS debug session ${sessionId}` }], structuredContent: { sessionId, ...(await backend.summary()) } };
+    },
+    debugCommand: async (input: DebugCommandInput): Promise<ToolResult> => {
+      const { sessionId, ...command } = input;
+      const state = await deps.sessions.get(sessionId).command(command);
+      return { content: [{ type: 'text', text: `Applied ${input.action} to ${sessionId}` }], structuredContent: state as unknown as Record<string, unknown> };
+    },
+    inspect: async (input: InspectInput): Promise<ToolResult> => {
+      const { sessionId, ...request } = input;
+      const result = await deps.sessions.get(sessionId).inspect({
+        ...(request.registers === undefined ? {} : { registers: request.registers }),
+        ...(request.memory === undefined ? {} : { memory: request.memory }),
+        ...(request.includeSymbols === undefined ? {} : { includeSymbols: request.includeSymbols }),
+      });
+      return { content: [{ type: 'text', text: `Inspected RARS session ${sessionId}` }], structuredContent: result as Record<string, unknown> };
+    },
+    modify: async (input: ModifyInput): Promise<ToolResult> => {
+      const { sessionId, ...request } = input;
+      const state = await deps.sessions.get(sessionId).modify({
+        ...(request.registers === undefined ? {} : { registers: request.registers }),
+        ...(request.memory === undefined ? {} : { memory: request.memory }),
+      });
+      return { content: [{ type: 'text', text: `Modified RARS session ${sessionId}` }], structuredContent: state as unknown as Record<string, unknown> };
     },
   };
 }
