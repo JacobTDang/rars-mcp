@@ -20,13 +20,23 @@ import java.util.Map;
 public final class BridgeServer {
     private final String token;
     private final RarsSimulator simulator = new RarsSimulator();
+    private final BridgeHooks hooks;
+    private final String mode;
 
-    private BridgeServer(String token) { this.token = token; }
+    private BridgeServer(String token, String mode, BridgeHooks hooks) {
+        this.token = token;
+        this.mode = mode;
+        this.hooks = hooks;
+    }
 
     public static void main(String[] args) throws Exception {
         String token = argument(args, "--token");
         int port = Integer.parseInt(argument(args, "--port"));
-        BridgeServer bridge = new BridgeServer(token);
+        run(token, port, "headless", BridgeHooks.NONE);
+    }
+
+    public static void run(String token, int port, String mode, BridgeHooks hooks) throws Exception {
+        BridgeServer bridge = new BridgeServer(token, mode, hooks);
         try (ServerSocket server = new ServerSocket(port, 16, InetAddress.getLoopbackAddress())) {
             System.err.println("RARS_MCP_PORT=" + server.getLocalPort());
             System.err.flush();
@@ -51,7 +61,7 @@ public final class BridgeServer {
                             response = BridgeResponse.error(id, "AUTHENTICATION_FAILED", "Invalid bridge token");
                         } else {
                             authenticated = true;
-                            response = BridgeResponse.success(id, mapOf("protocolVersion", 1, "mode", "headless"));
+                            response = BridgeResponse.success(id, mapOf("protocolVersion", 1, "mode", mode));
                         }
                     } else {
                         response = dispatch(request);
@@ -73,12 +83,17 @@ public final class BridgeServer {
         Map<String, Object> payload = request.payload;
         switch (request.command) {
             case "load":
-                simulator.load(strings(payload.get("files")), strings(payload.get("programArgs")), string(payload.get("stdin")));
+                List<String> files = strings(payload.get("files"));
+                hooks.beforeLoad(files, payload);
+                simulator.load(files, strings(payload.get("programArgs")), string(payload.get("stdin")));
+                hooks.afterMutation();
                 return BridgeResponse.success(request.id, simulator.snapshot());
             case "assemble":
                 return BridgeResponse.success(request.id, simulator.snapshot());
             case "command":
-                return BridgeResponse.success(request.id, command(payload));
+                Map<String, Object> commandResult = command(payload);
+                hooks.afterMutation();
+                return BridgeResponse.success(request.id, commandResult);
             case "inspect": {
                 Map<String, Object> result = new LinkedHashMap<>(simulator.snapshot());
                 Map<String, Object> registers = new LinkedHashMap<>();
@@ -105,6 +120,7 @@ public final class BridgeServer {
                     Map<String, Object> write = (Map<String, Object>) item;
                     simulator.writeMemory(integer(write.get("address")), integer(write.get("width")), number(write.get("value")));
                 }
+                hooks.afterMutation();
                 return BridgeResponse.success(request.id, simulator.snapshot());
             case "close":
                 return BridgeResponse.success(request.id, mapOf("closed", true));
