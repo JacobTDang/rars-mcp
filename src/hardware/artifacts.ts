@@ -11,6 +11,7 @@ const mediaTypes: Record<string, { type: string; mediaType: string }> = {
   '.ghw': { type: 'waveform', mediaType: 'application/vnd.ghdl.ghw' },
   '.json': { type: 'report', mediaType: 'application/json' },
   '.log': { type: 'log', mediaType: 'text/plain' },
+  '.jsonl': { type: 'trace', mediaType: 'application/x-ndjson' },
 };
 
 async function walk(root: string, directory: string): Promise<string[]> {

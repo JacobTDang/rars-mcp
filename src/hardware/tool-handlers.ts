@@ -2,13 +2,15 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import type { z } from 'zod';
 
 import type { HardwareClient } from './client.js';
-import type { hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema, hardwareWaveQuerySchema } from './tool-schemas.js';
+import type { hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema, hardwareRiscvGenerateSchema, hardwareTraceCompareSchema, hardwareWaveQuerySchema } from './tool-schemas.js';
 
 type ValidateInput = z.infer<typeof hardwareProjectValidateSchema>;
 type StartInput = z.infer<typeof hardwareJobStartSchema>;
 type IdInput = z.infer<typeof hardwareJobIdSchema>;
 type LogsInput = z.infer<typeof hardwareJobLogsSchema>;
 type WaveInput = z.infer<typeof hardwareWaveQuerySchema>;
+type TraceInput = z.infer<typeof hardwareTraceCompareSchema>;
+type GenerateInput = z.infer<typeof hardwareRiscvGenerateSchema>;
 
 function result(summary: string, structuredContent: Record<string, unknown>): CallToolResult {
   return { content: [{ type: 'text', text: summary }], structuredContent };
@@ -28,5 +30,7 @@ export function createHardwareToolHandlers(client: HardwareClient | undefined) {
     jobLogs: async (input: LogsInput) => result(`Read logs for hardware job ${input.jobId}`, await required().logs(input.jobId, input.offset, input.limit)),
     artifactList: async (input: IdInput) => result(`Listed artifacts for hardware job ${input.jobId}`, await required().artifacts(input.jobId)),
     waveQuery: async (input: WaveInput) => { const { jobId, ...query } = input; return result(`Queried waveform for hardware job ${jobId}`, await required().wave(jobId, query)); },
+    traceCompare: async (input: TraceInput) => result('Compared architectural retirement traces', await required().traceCompare(input)),
+    riscvGenerate: async (input: GenerateInput) => result(`Generated deterministic RISC-V program with seed ${input.seed}`, await required().riscvGenerate(input)),
   };
 }

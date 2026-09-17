@@ -11,6 +11,8 @@ import { createProviderRegistry } from './providers/registry.js';
 import { createSnapshot } from './snapshot.js';
 import type { HardwareLimits, HardwareResult, ProcessResult } from './types.js';
 import { loadOrCreateVcdIndex, queryWave } from './waveform.js';
+import { compareTraces, loadTrace, type TraceFormat, type TracePolicy } from './trace.js';
+import { generateRiscvProgram } from './generation.js';
 
 export interface HardwareWorkerConfig {
   workspaceRoot: string;
@@ -145,6 +147,12 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
           const indexPath = join(config.stateRoot, 'jobs', id, `wave-${artifact.id}.json`);
           return json(queryWave(await loadOrCreateVcdIndex(source, indexPath, artifact.sha256), body));
         }
+        if (request.method === 'POST' && url.pathname === '/trace/compare') {
+          const body = await request.json() as { left: { jobId: string; artifactId: string; format: TraceFormat }; right: { jobId: string; artifactId: string; format: TraceFormat }; policy?: TracePolicy; context?: number };
+          const resolveTrace = async (side: typeof body.left) => { const job = await store.get(side.jobId); const artifact = job.result?.artifacts.find((item) => item.id === side.artifactId && item.type === 'trace'); if (!artifact) throw new RarsError('ARTIFACT_CORRUPT', 'Trace artifact does not exist for this job'); return loadTrace(join(config.stateRoot, 'executions', side.jobId, 'artifacts', artifact.path), side.format); };
+          return json(compareTraces(await resolveTrace(body.left), await resolveTrace(body.right), body.policy, body.context));
+        }
+        if (request.method === 'POST' && url.pathname === '/riscv/generate') { const body = await request.json() as { seed: number; instructionCount: number }; return json({ seed: body.seed, assembly: generateRiscvProgram(body.seed, body.instructionCount) }); }
         const match = /^\/jobs\/([0-9a-f-]+)(?:\/(cancel|logs|artifacts))?$/u.exec(url.pathname);
         if (match) {
           const id = match[1] as string;

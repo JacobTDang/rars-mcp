@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
 import { createHardwareToolHandlers } from './hardware/tool-handlers.js';
-import { hardwareCapabilitiesSchema, hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema, hardwareWaveQuerySchema } from './hardware/tool-schemas.js';
+import { hardwareCapabilitiesSchema, hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema, hardwareRiscvGenerateSchema, hardwareTraceCompareSchema, hardwareWaveQuerySchema } from './hardware/tool-schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
@@ -55,5 +55,7 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('hardware_job_logs', { description: 'Read a bounded byte window from hardware job logs.', inputSchema: hardwareJobLogsSchema }, hardware.jobLogs);
   server.registerTool('hardware_artifact_list', { description: 'List immutable artifacts produced by a hardware job.', inputSchema: hardwareJobIdSchema }, hardware.artifactList);
   server.registerTool('hardware_wave_query', { description: 'Run a bounded hierarchy, value, transition, edge, unknown, pulse, or comparison query on a waveform artifact.', inputSchema: hardwareWaveQuerySchema }, hardware.waveQuery);
+  server.registerTool('hardware_trace_compare', { description: 'Normalize and compare RARS, RVFI, or canonical retirement traces and return the first divergence with cycle hints.', inputSchema: hardwareTraceCompareSchema }, hardware.traceCompare);
+  server.registerTool('hardware_riscv_generate', { description: 'Generate a deterministic seeded RISC-V assembly test program.', inputSchema: hardwareRiscvGenerateSchema }, hardware.riscvGenerate);
   return server;
 }
