@@ -124,3 +124,31 @@ export interface SourceSnapshot {
   files: SourceSnapshotFile[];
   createdAt: string;
 }
+
+export interface ProviderCommand {
+  executable: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  limits: HardwareLimits;
+}
+
+export interface ProcessResult {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  cancelled: boolean;
+  truncated: boolean;
+  durationMs: number;
+  executable: string;
+  args: string[];
+}
+
+export interface ProviderContext {
+  target: ResolvedTarget;
+  snapshotRoot: string;
+  buildRoot: string;
+  artifactRoot: string;
+}
