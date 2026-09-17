@@ -19,6 +19,7 @@ describe('HTTP service', () => {
     });
     const health = await handler.fetch(new Request('http://localhost/health'));
     expect(await health.json()).toMatchObject({ status: 'ok', rars: { jar: '/rars.jar' } });
+    expect(await (await handler.fetch(new Request('http://localhost/capabilities'))).json()).toMatchObject({ hardware: { enabled: false, available: false } });
 
     const client = new Client({ name: 'http-test', version: '1.0.0' });
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {

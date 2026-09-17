@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, chmod, chown, mkdir, readFile, readdir } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { RarsError } from '../errors.js';
@@ -34,33 +35,46 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
   const registry = createProviderRegistry({ executableVersions: config.executableVersions, allowRepositoryCommands: config.allowRepositoryCommands });
   const controllers = new Map<string, AbortController>();
   const running = new Set<Promise<void>>();
-  let queue = Promise.resolve();
+  const pending: string[] = [];
+  let active = 0;
   let closed = false;
 
   const execute = async (id: string) => {
     let claimed = false;
+    let sandbox: { uid: number; snapshotRoot: string; executionRoot: string } | undefined;
     try {
       const job = await store.claim(id);
       claimed = true;
-      const project = await loadHardwareProject(config.workspaceRoot, job.request.manifestPath, config.limits, await registry.capabilities(), config.allowRepositoryCommands);
-      const target = project.targets[job.request.target];
-      if (!target) throw new RarsError('INVALID_PROJECT', `Target does not exist: ${job.request.target}`);
-      const snapshot = await createSnapshot(project, target, config.stateRoot);
-      const jobRoot = join(config.stateRoot, 'jobs', id);
+      const target = job.request.resolvedTarget;
+      const snapshot = job.request.snapshot;
+      if (!target || !snapshot) throw new RarsError('INVALID_PROJECT', 'Queued job has no immutable snapshot');
+      const controller = new AbortController();
+      controllers.set(id, controller);
+      if ((await store.get(id)).cancellationRequested) controller.abort();
+      const jobRoot = join(config.stateRoot, 'executions', id);
       const buildRoot = join(jobRoot, 'build');
       const artifactRoot = join(jobRoot, 'artifacts');
       await mkdir(buildRoot, { recursive: true });
       await mkdir(artifactRoot, { recursive: true });
+      const slot = activeIds.indexOf(id);
+      const runAs = process.platform === 'linux' && process.getuid?.() === 0 ? { uid: 20_000 + slot, gid: 20_000 + slot } : undefined;
+      if (runAs) {
+        await chmod(config.stateRoot, 0o711); await mkdir(join(config.stateRoot, 'executions'), { recursive: true, mode: 0o711 });
+        await chmod(join(config.stateRoot, 'executions'), 0o711);
+        await chown(jobRoot, 0, runAs.gid); await chmod(jobRoot, 0o710);
+        await secureSnapshot(snapshot.root, runAs.gid);
+        for (const dir of [buildRoot, artifactRoot]) { await chown(dir, runAs.uid, runAs.gid); await chmod(dir, 0o700); }
+        sandbox = { uid: runAs.uid, snapshotRoot: snapshot.root, executionRoot: jobRoot };
+      }
       const context = { target, snapshotRoot: snapshot.root, buildRoot, artifactRoot };
       const provider = registry.get(target.provider);
       const commands = await provider.commands(context);
-      const controller = new AbortController();
-      controllers.set(id, controller);
       const results: ProcessResult[] = [];
       for (const command of commands) {
-        const result = await runBoundedProcess(command, controller.signal);
+        if ((await store.get(id)).cancellationRequested) controller.abort();
+        const result = await runBoundedProcess({ ...command, artifactRoot, ...(runAs ? { runAs } : {}) }, controller.signal);
         results.push(result);
-        await appendFile(join(jobRoot, 'combined.log'), result.stdout + result.stderr, { mode: 0o600 });
+        await appendFile(join(config.stateRoot, 'jobs', id, 'combined.log'), result.stdout + result.stderr, { mode: 0o600 });
         if (result.exitCode !== 0 || result.timedOut || result.cancelled || result.truncated) break;
       }
       const artifacts = await finalizeArtifacts(id, artifactRoot, target.effectiveLimits.artifactMb * 1024 * 1024);
@@ -74,14 +88,27 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
       try { await store.finish(id, 'failed', result); } catch {}
     } finally {
       controllers.delete(id);
+      if (sandbox) {
+        spawnSync('pkill', ['-KILL', '-u', String(sandbox.uid)], { stdio: 'ignore' });
+        await chmod(sandbox.snapshotRoot, 0o700).catch(() => undefined);
+        await chmod(sandbox.executionRoot, 0o700).catch(() => undefined);
+      }
     }
   };
 
+  const activeIds: string[] = [];
+  const pump = () => {
+    while (!closed && active < config.limits.concurrency && pending.length > 0) {
+      const id = pending.shift() as string;
+      active++; activeIds.push(id);
+      const task = execute(id);
+      running.add(task);
+      void task.finally(() => { running.delete(task); active--; activeIds.splice(activeIds.indexOf(id), 1); pump(); });
+    }
+  };
   const schedule = (id: string) => {
-    const task = queue.then(() => execute(id));
-    queue = task.catch(() => undefined);
-    running.add(task);
-    void task.finally(() => running.delete(task));
+    pending.push(id);
+    pump();
   };
 
   return {
@@ -101,7 +128,10 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
           const body = await request.json() as { manifestPath: string; target: string; parentJobId?: string };
           const project = await loadHardwareProject(config.workspaceRoot, body.manifestPath, config.limits, await registry.capabilities(), config.allowRepositoryCommands);
           if (!project.targets[body.target]) throw new RarsError('INVALID_PROJECT', `Target does not exist: ${body.target}`);
-          const job = await store.create({ manifestPath: body.manifestPath, target: body.target, ...(body.parentJobId ? { parentJobId: body.parentJobId } : {}) });
+          const target = project.targets[body.target];
+          if (!target) throw new RarsError('INVALID_PROJECT', `Target does not exist: ${body.target}`);
+          const snapshot = await createSnapshot(project, target, config.stateRoot);
+          const job = await store.create({ manifestPath: body.manifestPath, target: body.target, snapshot, resolvedTarget: target, ...(body.parentJobId ? { parentJobId: body.parentJobId } : {}) });
           schedule(job.id);
           return json(job, 202);
         }
@@ -136,4 +166,13 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
       await Promise.allSettled([...running]);
     },
   };
+}
+
+async function secureSnapshot(root: string, gid: number): Promise<void> {
+  await chown(root, 0, gid); await chmod(root, 0o550);
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) await secureSnapshot(path, gid);
+    else { await chown(path, 0, gid); await chmod(path, 0o440); }
+  }
 }

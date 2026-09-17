@@ -42,7 +42,9 @@ export class HardwareJobStore {
       const job = await this.read(id);
       if (job.state !== 'running') throw this.conflict(job, 'finish');
       const now = new Date().toISOString();
-      const next: HardwareJob = { ...job, state, result, updatedAt: now, finishedAt: now };
+      const cancelled = job.cancellationRequested;
+      const nextResult = cancelled ? this.interruptedResult('cancelled') : result;
+      const next: HardwareJob = { ...job, state: cancelled ? 'cancelled' : state, result: nextResult, updatedAt: now, finishedAt: now };
       await this.persist(next);
       return next;
     });
@@ -77,7 +79,9 @@ export class HardwareJobStore {
       for (const job of await this.list()) {
         if (job.state !== 'queued' && job.state !== 'running') continue;
         const now = new Date().toISOString();
-        await this.persist({ ...job, state: 'aborted', updatedAt: now, finishedAt: now, result: this.interruptedResult('aborted') });
+        const interrupted = this.interruptedResult('aborted');
+        if (job.result?.artifacts) interrupted.artifacts = job.result.artifacts;
+        await this.persist({ ...job, state: 'aborted', updatedAt: now, finishedAt: now, result: interrupted });
         recovered.push(job.id);
       }
       return recovered;

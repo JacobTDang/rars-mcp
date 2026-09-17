@@ -139,6 +139,15 @@ export async function loadHardwareProject(
     if (target.standard && !capability.standards.includes(target.standard)) {
       throw new RarsError('INVALID_PROJECT', `Provider does not support standard: ${target.standard}`, { provider: target.provider, standard: target.standard });
     }
+    for (const directory of target.include_dirs) {
+      if (isAbsolute(directory) || directory.split(/[\\/]/u).includes('..')) throw new RarsError('PATH_OUTSIDE_WORKSPACE', `Include directory is outside the workspace: ${directory}`);
+      const resolvedDirectory = await realpath(resolve(root, directory)).catch(() => { throw new RarsError('INVALID_PROJECT', `Include directory does not exist: ${directory}`); });
+      if (!isContained(root, resolvedDirectory)) throw new RarsError('PATH_OUTSIDE_WORKSPACE', `Include directory is outside the workspace: ${directory}`);
+    }
+    if (Object.keys(target.options).length > 0) throw new RarsError('INVALID_PROJECT', `Provider ${target.provider} does not accept options`, { options: Object.keys(target.options) });
+    const waveform = target.artifacts.waveform;
+    for (const key of Object.keys(target.artifacts)) if (key !== 'waveform') throw new RarsError('INVALID_PROJECT', `Unsupported artifact declaration: ${key}`);
+    if (waveform && !capability.artifactFormats.includes(waveform)) throw new RarsError('INVALID_PROJECT', `Unsupported waveform format: ${waveform}`);
     if (target.provider === 'repository-command') {
       if (!target.allow_repository_command || !allowRepositoryCommands) {
         throw new RarsError('INVALID_PROJECT', 'Repository commands are disabled', { target: name });

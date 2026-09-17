@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { chmod, mkdir, open, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import type { ResolvedProject, ResolvedTarget, SourceSnapshot, SourceSnapshotFile } from './types.js';
 
@@ -15,15 +15,25 @@ export async function createSnapshot(
 ): Promise<SourceSnapshot> {
   const id = randomUUID();
   const root = join(stateRoot, 'snapshots', id);
+  const canonicalRoot = await realpath(project.root);
   await mkdir(root, { recursive: true });
   const files: SourceSnapshotFile[] = [];
   for (const path of [...target.sources].sort()) {
-    const source = join(project.root, path);
+    const source = join(canonicalRoot, path);
+    const canonical = await realpath(source);
+    const rel = relative(canonicalRoot, canonical);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error(`Source escaped workspace while snapshotting: ${path}`);
     const destination = join(root, path);
     await mkdir(dirname(destination), { recursive: true });
-    await copyFile(source, destination);
+    const before = await stat(canonical);
+    const handle = await open(canonical, 'r');
+    try {
+      const opened = await handle.stat();
+      if (opened.dev !== before.dev || opened.ino !== before.ino || !opened.isFile()) throw new Error(`Source changed while snapshotting: ${path}`);
+      await writeFile(destination, await handle.readFile(), { mode: 0o600, flag: 'wx' });
+    } finally { await handle.close(); }
     const contents = await readFile(destination);
-    const sourceMode = (await stat(source)).mode;
+    const sourceMode = before.mode;
     await chmod(destination, sourceMode & 0o111 ? 0o555 : 0o444);
     files.push({ path, size: contents.byteLength, sha256: sha256(contents) });
   }

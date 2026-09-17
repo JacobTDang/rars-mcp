@@ -29,7 +29,12 @@ export function createHttpHandler(dependencies: ToolDependencies): HttpHandler {
         return Response.json({ status: 'ok', rars: { jar: dependencies.rarsJar }, liveBridge: liveAvailable() ? 'available' : 'disconnected' });
       }
       if (request.method === 'GET' && pathname === '/capabilities') {
-        return Response.json({ headless: true, statefulDebugging: Boolean(dependencies.bridgeJar), live: liveAvailable(), transports: ['streamable-http', 'stdio-proxy'] });
+        let hardware: unknown = { enabled: false, available: false };
+        if (dependencies.hardwareClient) {
+          try { hardware = { enabled: true, available: true, ...await dependencies.hardwareClient.capabilities() }; }
+          catch { hardware = { enabled: true, available: false }; }
+        }
+        return Response.json({ headless: true, statefulDebugging: Boolean(dependencies.bridgeJar), live: liveAvailable(), hardware, transports: ['streamable-http', 'stdio-proxy'] });
       }
       if (pathname !== '/mcp') return new Response('Not found', { status: 404 });
       return mcp.fetch(request);

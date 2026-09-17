@@ -24,10 +24,12 @@ export class VerilatorProvider implements HardwareProvider {
     for (const directory of target.includeDirs) common.push(`-I${join(context.snapshotRoot, directory)}`);
     for (const [name, value] of Object.entries(target.parameters)) common.push(`-G${name}=${String(value)}`);
     const sources = target.sources.map((source) => join(context.snapshotRoot, source));
-    const args = target.action === 'lint'
-      ? ['--lint-only', ...common, ...sources]
-      : ['--binary', '--timing', '--Mdir', context.buildRoot, ...this.traceArgs(target, context.artifactRoot), ...common, ...sources];
-    return [{ executable: 'verilator', args, cwd: context.buildRoot, env: { PATH: process.env.PATH ?? '' }, limits: target.effectiveLimits }];
+    if (target.action === 'lint') return [{ executable: 'verilator', args: ['--lint-only', ...common, ...sources], cwd: context.buildRoot, env: { PATH: process.env.PATH ?? '' }, limits: target.effectiveLimits }];
+    const binary = join(context.buildRoot, `V${target.top}`);
+    return [
+      { executable: 'verilator', args: ['--binary', '--timing', '--Mdir', context.buildRoot, ...this.traceArgs(target, context.artifactRoot), ...common, ...sources], cwd: context.buildRoot, env: { PATH: process.env.PATH ?? '' }, limits: target.effectiveLimits },
+      { executable: binary, args: [], cwd: context.buildRoot, env: { PATH: process.env.PATH ?? '' }, limits: target.effectiveLimits },
+    ];
   }
 
   async parseResult(context: ProviderContext, results: ProcessResult[], artifacts: ArtifactRecord[]): Promise<HardwareResult> {

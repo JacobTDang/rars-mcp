@@ -97,6 +97,8 @@ export interface HardwareJobRequest {
   manifestPath: string;
   target: string;
   parentJobId?: string;
+  snapshot?: SourceSnapshot;
+  resolvedTarget?: ResolvedTarget;
 }
 
 export interface HardwareJob {
@@ -131,6 +133,8 @@ export interface ProviderCommand {
   cwd: string;
   env: Record<string, string>;
   limits: HardwareLimits;
+  artifactRoot?: string;
+  runAs?: { uid: number; gid: number };
 }
 
 export interface ProcessResult {
