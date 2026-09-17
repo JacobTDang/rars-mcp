@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { ResolvedProject, ResolvedTarget, SourceSnapshot, SourceSnapshotFile } from './types.js';
@@ -23,7 +23,8 @@ export async function createSnapshot(
     await mkdir(dirname(destination), { recursive: true });
     await copyFile(source, destination);
     const contents = await readFile(destination);
-    await chmod(destination, 0o444);
+    const sourceMode = (await stat(source)).mode;
+    await chmod(destination, sourceMode & 0o111 ? 0o555 : 0o444);
     files.push({ path, size: contents.byteLength, sha256: sha256(contents) });
   }
   const aggregate = sha256(files.map((file) => `${file.path}\0${file.size}\0${file.sha256}\n`).join(''));
