@@ -10,6 +10,7 @@ import { runBoundedProcess } from './process.js';
 import { createProviderRegistry } from './providers/registry.js';
 import { createSnapshot } from './snapshot.js';
 import type { HardwareLimits, HardwareResult, ProcessResult } from './types.js';
+import { loadOrCreateVcdIndex, queryWave } from './waveform.js';
 
 export interface HardwareWorkerConfig {
   workspaceRoot: string;
@@ -134,6 +135,15 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
           const job = await store.create({ manifestPath: body.manifestPath, target: body.target, snapshot, resolvedTarget: target, ...(body.parentJobId ? { parentJobId: body.parentJobId } : {}) });
           schedule(job.id);
           return json(job, 202);
+        }
+        const waveMatch = /^\/jobs\/([0-9a-f-]+)\/wave$/u.exec(url.pathname);
+        if (request.method === 'POST' && waveMatch) {
+          const id = waveMatch[1] as string; const body = await request.json() as { artifactId: string; operation: string; signal?: string; otherSignal?: string; startTime?: number; endTime?: number; limit?: number; cursor?: number };
+          const job = await store.get(id); const artifact = job.result?.artifacts.find((item) => item.id === body.artifactId && item.type === 'waveform');
+          if (!artifact) throw new RarsError('ARTIFACT_CORRUPT', 'Waveform artifact does not exist for this job');
+          const source = join(config.stateRoot, 'executions', id, 'artifacts', artifact.path);
+          const indexPath = join(config.stateRoot, 'jobs', id, `wave-${artifact.id}.json`);
+          return json(queryWave(await loadOrCreateVcdIndex(source, indexPath, artifact.sha256), body));
         }
         const match = /^\/jobs\/([0-9a-f-]+)(?:\/(cancel|logs|artifacts))?$/u.exec(url.pathname);
         if (match) {

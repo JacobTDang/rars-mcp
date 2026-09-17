@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
 import { createHardwareToolHandlers } from './hardware/tool-handlers.js';
-import { hardwareCapabilitiesSchema, hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema } from './hardware/tool-schemas.js';
+import { hardwareCapabilitiesSchema, hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema, hardwareWaveQuerySchema } from './hardware/tool-schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
@@ -54,5 +54,6 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('hardware_job_cancel', { description: 'Cancel a queued or running hardware job.', inputSchema: hardwareJobIdSchema }, hardware.jobCancel);
   server.registerTool('hardware_job_logs', { description: 'Read a bounded byte window from hardware job logs.', inputSchema: hardwareJobLogsSchema }, hardware.jobLogs);
   server.registerTool('hardware_artifact_list', { description: 'List immutable artifacts produced by a hardware job.', inputSchema: hardwareJobIdSchema }, hardware.artifactList);
+  server.registerTool('hardware_wave_query', { description: 'Run a bounded hierarchy, value, transition, edge, unknown, pulse, or comparison query on a waveform artifact.', inputSchema: hardwareWaveQuerySchema }, hardware.waveQuery);
   return server;
 }

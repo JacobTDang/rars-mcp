@@ -15,6 +15,7 @@ export class HardwareClient {
   cancel(id: string): Promise<Record<string, unknown>> { return this.request('POST', `/jobs/${id}/cancel`); }
   logs(id: string, offset: number, limit: number): Promise<Record<string, unknown>> { return this.request('GET', `/jobs/${id}/logs?offset=${offset}&limit=${limit}`); }
   artifacts(id: string): Promise<Record<string, unknown>> { return this.request('GET', `/jobs/${id}/artifacts`); }
+  wave(id: string, input: Record<string, unknown>): Promise<Record<string, unknown>> { return this.request('POST', `/jobs/${id}/wave`, input); }
 
   private async request(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
     const controller = new AbortController();
