@@ -7,7 +7,7 @@ export const hardwareJobIdSchema = z.object({ jobId: z.string().uuid() });
 export const hardwareJobLogsSchema = hardwareJobIdSchema.extend({ offset: z.number().int().nonnegative().default(0), limit: z.number().int().positive().max(65_536).default(8192) });
 export const hardwareWaveQuerySchema = hardwareJobIdSchema.extend({
   artifactId: z.string().uuid(), operation: z.enum(['hierarchy', 'signals', 'value_at', 'transitions', 'first_edge', 'first_unknown', 'pulse_widths', 'compare']),
-  signal: z.string().optional(), otherSignal: z.string().optional(), startTime: z.number().nonnegative().optional(), endTime: z.number().nonnegative().optional(), limit: z.number().int().positive().max(10_000).default(1000), cursor: z.number().int().nonnegative().default(0),
+  signal: z.string().optional(), otherSignal: z.string().optional(), startTime: z.number().nonnegative().optional(), endTime: z.number().nonnegative().optional(), limit: z.number().int().positive().max(10_000).default(1000), cursor: z.number().int().nonnegative().default(0), maxResponseBytes: z.number().int().min(256).max(1_048_576).default(262_144),
 });
 const traceSideSchema = z.object({ jobId: z.string().uuid(), artifactId: z.string().uuid(), format: z.enum(['normalized', 'rvfi', 'rars']) });
 export const hardwareTraceCompareSchema = z.object({

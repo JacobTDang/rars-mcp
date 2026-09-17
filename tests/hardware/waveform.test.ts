@@ -32,4 +32,12 @@ describe('bounded waveform queries', () => {
     expect(queryWave(index, { operation: 'value_at', signal: 'data', startTime: 7 })).toMatchObject({ value: '10xz' });
     expect(queryWave(index, { operation: 'first_unknown', signal: 'data' })).toMatchObject({ transition: { time: 5, value: '10xz' } });
   });
+
+  it('bounds encoded page bytes and preserves an exact continuation cursor', () => {
+    const first = queryWave(index, { operation: 'transitions', signal: 'cpu.clk', limit: 100, maxResponseBytes: 92 });
+    expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(92);
+    expect(first).toMatchObject({ items: [{ time: 0, value: '0' }], nextCursor: 1, truncatedByBytes: true });
+    const second = queryWave(index, { operation: 'transitions', signal: 'cpu.clk', limit: 100, cursor: 1, maxResponseBytes: 92 });
+    expect(second).toMatchObject({ items: [{ time: 5, value: '1' }], nextCursor: 2 });
+  });
 });

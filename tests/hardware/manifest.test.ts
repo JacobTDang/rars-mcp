@@ -13,7 +13,7 @@ const limits: HardwareLimits = {
   outputBytes: 4_194_304, artifactMb: 512, sourceFiles: 10_000, sourceBytes: 268_435_456,
 };
 const capabilities: ProviderCapability[] = [
-  { id: 'verilator', version: 'test', available: true, actions: ['lint', 'simulate'], languages: ['systemverilog'], standards: ['1800-2017'], artifactFormats: ['vcd', 'fst'] },
+  { id: 'verilator', version: 'test', available: true, actions: ['lint', 'simulate'], languages: ['systemverilog'], standards: ['1800-2017'], artifactFormats: ['vcd', 'fst'], optionSchema: { traceDepth: { type: 'integer', minimum: 0, maximum: 99 } } },
   { id: 'ghdl', version: 'test', available: true, actions: ['analyze', 'simulate'], languages: ['vhdl'], standards: ['08'], artifactFormats: ['vcd', 'fst', 'ghw'] },
   { id: 'repository-command', version: '1', available: true, actions: ['test'], languages: [], standards: [], artifactFormats: [] },
 ];
@@ -95,5 +95,29 @@ targets:
 
     const tiny = { ...limits, wallTimeSeconds: 1 };
     await expect(loadHardwareProject(join(fixtureRoot, 'systemverilog'), 'hardware.project.yaml', tiny, capabilities, false)).rejects.toThrow(/wall_time_seconds/i);
+  });
+
+  it('accepts typed provider options and rejects unknown or ill-typed options', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hardware-options-'));
+    await writeFile(join(root, 'top.sv'), 'module top; endmodule\n');
+    const writeManifest = async (options: string) => writeFile(join(root, 'hardware.project.yaml'), `
+version: 1
+name: options
+sources: [top.sv]
+targets:
+  unit:
+    provider: verilator
+    action: lint
+    language: systemverilog
+    standard: "1800-2017"
+    top: top
+    options: ${options}
+`);
+    await writeManifest('{ traceDepth: 4 }');
+    await expect(loadHardwareProject(root, 'hardware.project.yaml', limits, capabilities, false)).resolves.toMatchObject({ targets: { unit: { options: { traceDepth: 4 } } } });
+    await writeManifest('{ shell: bash }');
+    await expect(loadHardwareProject(root, 'hardware.project.yaml', limits, capabilities, false)).rejects.toThrow(/unknown provider option/i);
+    await writeManifest('{ traceDepth: huge }');
+    await expect(loadHardwareProject(root, 'hardware.project.yaml', limits, capabilities, false)).rejects.toThrow(/traceDepth/i);
   });
 });

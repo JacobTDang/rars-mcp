@@ -54,7 +54,14 @@ export interface ProviderCapability {
   languages: string[];
   standards: string[];
   artifactFormats: string[];
+  optionSchema?: Record<string, ProviderOptionSchema>;
 }
+
+export type ProviderOptionSchema =
+  | { type: 'boolean'; description?: string }
+  | { type: 'integer'; minimum?: number; maximum?: number; description?: string }
+  | { type: 'string'; enum?: string[]; pattern?: string; description?: string }
+  | { type: 'string-array'; pattern?: string; maximumItems?: number; description?: string };
 
 export interface ResolvedTarget {
   name: string;

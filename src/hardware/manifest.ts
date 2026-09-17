@@ -6,7 +6,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 
 import { RarsError } from '../errors.js';
-import type { HardwareLimits, ProviderCapability, ResolvedProject, ResolvedTarget } from './types.js';
+import type { HardwareLimits, ProviderCapability, ProviderOptionSchema, ResolvedProject, ResolvedTarget } from './types.js';
 
 const limitSchema = z.object({
   wall_time_seconds: z.number().int().positive().optional(),
@@ -65,6 +65,19 @@ function mergeLimits(server: HardwareLimits, requested: z.infer<typeof limitSche
     }
   }
   return merged;
+}
+
+function validateProviderOptions(provider: string, options: Record<string, unknown>, schema: Record<string, ProviderOptionSchema> = {}): void {
+  for (const [name, value] of Object.entries(options)) {
+    const rule = schema[name];
+    if (!rule) throw new RarsError('INVALID_PROJECT', `Unknown provider option ${name} for ${provider}`, { provider, option: name });
+    let valid = false;
+    if (rule.type === 'boolean') valid = typeof value === 'boolean';
+    if (rule.type === 'integer') valid = Number.isInteger(value) && (rule.minimum === undefined || Number(value) >= rule.minimum) && (rule.maximum === undefined || Number(value) <= rule.maximum);
+    if (rule.type === 'string') valid = typeof value === 'string' && (rule.enum === undefined || rule.enum.includes(value)) && (rule.pattern === undefined || new RegExp(rule.pattern, 'u').test(value));
+    if (rule.type === 'string-array') valid = Array.isArray(value) && (rule.maximumItems === undefined || value.length <= rule.maximumItems) && value.every((item) => typeof item === 'string' && (rule.pattern === undefined || new RegExp(rule.pattern, 'u').test(item)));
+    if (!valid) throw new RarsError('INVALID_PROJECT', `Invalid value for provider option ${name}`, { provider, option: name, expected: rule });
+  }
 }
 
 export async function loadHardwareProject(
@@ -145,7 +158,7 @@ export async function loadHardwareProject(
       const resolvedDirectory = await realpath(resolve(root, directory)).catch(() => { throw new RarsError('INVALID_PROJECT', `Include directory does not exist: ${directory}`); });
       if (!isContained(root, resolvedDirectory)) throw new RarsError('PATH_OUTSIDE_WORKSPACE', `Include directory is outside the workspace: ${directory}`);
     }
-    if (Object.keys(target.options).length > 0) throw new RarsError('INVALID_PROJECT', `Provider ${target.provider} does not accept options`, { options: Object.keys(target.options) });
+    validateProviderOptions(target.provider, target.options, capability.optionSchema);
     const waveform = target.artifacts.waveform;
     for (const key of Object.keys(target.artifacts)) if (key !== 'waveform') throw new RarsError('INVALID_PROJECT', `Unsupported artifact declaration: ${key}`);
     if (waveform && !capability.artifactFormats.includes(waveform)) throw new RarsError('INVALID_PROJECT', `Unsupported waveform format: ${waveform}`);

@@ -9,14 +9,14 @@ export class VerificationProvider implements HardwareProvider {
   constructor(private readonly kind: ToolKind, private readonly version: string | null) {}
   async capability(): Promise<ProviderCapability> {
     const definitions = {
-      cocotb: { actions: ['test'], languages: ['verilog', 'systemverilog', 'vhdl'], formats: ['vcd', 'fst', 'ghw'] },
-      yosys: { actions: ['synthesize', 'analyze'], languages: ['verilog', 'systemverilog'], formats: ['json'] },
-      sby: { actions: ['prove', 'cover', 'bmc'], languages: ['verilog', 'systemverilog'], formats: ['vcd'] },
-      'riscv-formal': { actions: ['prove'], languages: ['verilog', 'systemverilog'], formats: ['vcd'] },
-      spike: { actions: ['trace'], languages: ['riscv'], formats: ['jsonl'] },
-      'rars-trace': { actions: ['trace'], languages: ['riscv'], formats: ['jsonl'] },
+      cocotb: { actions: ['test'], languages: ['verilog', 'systemverilog', 'vhdl'], formats: ['vcd', 'fst', 'ghw'], options: { testcase: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }, simulator: { type: 'string', enum: ['verilator', 'icarus', 'ghdl'] } } },
+      yosys: { actions: ['synthesize', 'analyze'], languages: ['verilog', 'systemverilog'], formats: ['json'], options: {} },
+      sby: { actions: ['prove', 'cover', 'bmc'], languages: ['verilog', 'systemverilog'], formats: ['vcd'], options: { task: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' } } },
+      'riscv-formal': { actions: ['prove'], languages: ['verilog', 'systemverilog'], formats: ['vcd'], options: { check: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' }, config: { type: 'string', pattern: '^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$' } } },
+      spike: { actions: ['trace'], languages: ['riscv'], formats: ['jsonl'], options: { isa: { type: 'string', pattern: '^rv(?:32|64)[a-z0-9_]+$' }, maxInstructions: { type: 'integer', minimum: 1, maximum: 10000000 } } },
+      'rars-trace': { actions: ['trace'], languages: ['riscv'], formats: ['jsonl'], options: {} },
     }[this.kind];
-    return { id: this.kind, version: this.version ?? 'unavailable', available: this.version !== null, ...(this.version ? {} : { unavailableReason: `${this.kind} executable not found` }), actions: definitions.actions, languages: definitions.languages, standards: [], artifactFormats: definitions.formats };
+    return { id: this.kind, version: this.version ?? 'unavailable', available: this.version !== null, ...(this.version ? {} : { unavailableReason: `${this.kind} executable not found` }), actions: definitions.actions, languages: definitions.languages, standards: [], artifactFormats: definitions.formats, optionSchema: definitions.options as NonNullable<ProviderCapability['optionSchema']> };
   }
   validate(target: ResolvedTarget): void { if (!target.top) throw new RarsError('INVALID_PROJECT', `${this.kind} target requires top to name a source script, test, or executable`); if (target.top.includes('..') || target.top.startsWith('/')) throw new RarsError('PATH_OUTSIDE_WORKSPACE', `Invalid ${this.kind} top path`); }
   async commands(context: ProviderContext): Promise<ProviderCommand[]> {

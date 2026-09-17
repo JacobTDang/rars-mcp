@@ -66,22 +66,42 @@ export async function loadOrCreateVcdIndex(sourcePath: string, indexPath: string
   return index;
 }
 
-export function queryWave(index: WaveIndex, input: { operation: string; signal?: string; otherSignal?: string; startTime?: number; endTime?: number; limit?: number; cursor?: number }): Record<string, unknown> {
+export function queryWave(index: WaveIndex, input: { operation: string; signal?: string; otherSignal?: string; startTime?: number; endTime?: number; limit?: number; cursor?: number; maxResponseBytes?: number }): Record<string, unknown> {
   const limit = Math.min(10_000, Math.max(1, input.limit ?? 1000)); const cursor = Math.max(0, input.cursor ?? 0);
-  if (input.operation === 'hierarchy') return { timescale: index.timescale, startTime: index.startTime, endTime: index.endTime, scopes: index.scopes.slice(cursor, cursor + limit), nextCursor: cursor + limit < index.scopes.length ? cursor + limit : null };
-  if (input.operation === 'signals') return { signals: index.signals.slice(cursor, cursor + limit).map(({ transitions: _, ...signal }) => signal), nextCursor: cursor + limit < index.signals.length ? cursor + limit : null };
+  const maxBytes = input.maxResponseBytes ?? 262_144;
+  if (input.operation === 'hierarchy') return boundedPage({ timescale: index.timescale, startTime: index.startTime, endTime: index.endTime }, 'scopes', index.scopes, cursor, limit, maxBytes);
+  if (input.operation === 'signals') return boundedPage({}, 'signals', index.signals.map(({ transitions: _, ...signal }) => signal), cursor, limit, maxBytes);
   const signal = findSignal(index, input.signal);
   const start = input.startTime ?? index.startTime; const end = input.endTime ?? index.endTime;
   const window = signal.transitions.filter((item) => item.time >= start && item.time <= end);
   if (input.operation === 'value_at') { const at = input.startTime ?? 0; return { signal: signal.path, time: at, value: [...signal.transitions].reverse().find((item) => item.time <= at)?.value ?? null }; }
-  if (input.operation === 'transitions') return page(signal.path, window, cursor, limit);
+  if (input.operation === 'transitions') return page(signal.path, window, cursor, limit, maxBytes);
   if (input.operation === 'first_edge') return { signal: signal.path, transition: window.find((item, position) => position > 0 && item.value !== window[position - 1]?.value) ?? null };
   if (input.operation === 'first_unknown') return { signal: signal.path, transition: window.find((item) => /[xz]/u.test(item.value)) ?? null };
-  if (input.operation === 'pulse_widths') return page(signal.path, window.slice(1).map((item, position) => ({ value: window[position]?.value, startTime: window[position]?.time, endTime: item.time, width: item.time - (window[position]?.time ?? item.time) })), cursor, limit);
+  if (input.operation === 'pulse_widths') return page(signal.path, window.slice(1).map((item, position) => ({ value: window[position]?.value, startTime: window[position]?.time, endTime: item.time, width: item.time - (window[position]?.time ?? item.time) })), cursor, limit, maxBytes);
   if (input.operation === 'compare') { const other = findSignal(index, input.otherSignal); const times = [...new Set([...signal.transitions, ...other.transitions].map((item) => item.time))].sort((a, b) => a - b); const mismatch = times.find((at) => valueAt(signal, at) !== valueAt(other, at)); return { equal: mismatch === undefined, firstMismatch: mismatch === undefined ? null : { time: mismatch, left: valueAt(signal, mismatch), right: valueAt(other, mismatch) } }; }
   throw new RarsError('INVALID_PROJECT', `Unsupported waveform operation: ${input.operation}`);
 }
 
 function findSignal(index: WaveIndex, selector?: string): WaveSignal { const matches = index.signals.filter((item) => item.path === selector || item.name === selector); if (matches.length !== 1) throw new RarsError('INVALID_PROJECT', `Signal selector must match exactly one signal: ${selector ?? ''}`, { matches: matches.map((item) => item.path) }); return matches[0] as WaveSignal; }
 function valueAt(signal: WaveSignal, time: number): string | null { return [...signal.transitions].reverse().find((item) => item.time <= time)?.value ?? null; }
-function page(signal: string, items: unknown[], cursor: number, limit: number): Record<string, unknown> { return { signal, items: items.slice(cursor, cursor + limit), nextCursor: cursor + limit < items.length ? cursor + limit : null }; }
+function page(signal: string, items: unknown[], cursor: number, limit: number, maxBytes: number): Record<string, unknown> { return boundedPage({ signal }, 'items', items, cursor, limit, maxBytes); }
+
+function boundedPage(prefix: Record<string, unknown>, key: string, items: unknown[], cursor: number, limit: number, maxBytes: number): Record<string, unknown> {
+  const selected: unknown[] = [];
+  const maximum = Math.min(items.length, cursor + limit);
+  for (let position = cursor; position < maximum; position++) {
+    const candidate = [...selected, items[position]];
+    const nextCursor = position + 1 < items.length ? position + 1 : null;
+    const value = { ...prefix, [key]: candidate, nextCursor, ...(position + 1 < maximum ? { truncatedByBytes: true } : {}) };
+    if (Buffer.byteLength(JSON.stringify(value)) > maxBytes) break;
+    selected.push(items[position]);
+  }
+  if (selected.length === 0 && cursor < maximum) throw new RarsError('ARTIFACT_LIMIT_EXCEEDED', 'Waveform response byte limit is too small for one result', { maximum: maxBytes });
+  const consumed = cursor + selected.length;
+  const hasMore = consumed < items.length;
+  const truncatedByBytes = consumed < maximum;
+  const value = { ...prefix, [key]: selected, nextCursor: hasMore ? consumed : null, ...(truncatedByBytes ? { truncatedByBytes: true } : {}) };
+  if (Buffer.byteLength(JSON.stringify(value)) > maxBytes) throw new RarsError('ARTIFACT_LIMIT_EXCEEDED', 'Waveform response exceeds the byte limit', { maximum: maxBytes });
+  return value;
+}

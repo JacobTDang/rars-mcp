@@ -8,7 +8,7 @@ export class VerilatorProvider implements HardwareProvider {
   constructor(private readonly version: string | null) {}
 
   async capability(): Promise<ProviderCapability> {
-    return { id: 'verilator', version: this.version ?? 'unavailable', available: this.version !== null, ...(this.version === null ? { unavailableReason: 'verilator executable not found' } : {}), actions: ['lint', 'simulate'], languages: ['verilog', 'systemverilog'], standards: ['1364-2005', '1800-2017'], artifactFormats: ['vcd', 'fst'] };
+    return { id: 'verilator', version: this.version ?? 'unavailable', available: this.version !== null, ...(this.version === null ? { unavailableReason: 'verilator executable not found' } : {}), actions: ['lint', 'simulate'], languages: ['verilog', 'systemverilog'], standards: ['1364-2005', '1800-2017'], artifactFormats: ['vcd', 'fst'], optionSchema: { traceDepth: { type: 'integer', minimum: 0, maximum: 99, description: 'Maximum hierarchy depth captured in a trace' } } };
   }
 
   validate(target: ResolvedTarget): void {
@@ -52,8 +52,10 @@ export class VerilatorProvider implements HardwareProvider {
 
   private traceArgs(target: ResolvedTarget, artifactRoot: string): string[] {
     const waveform = target.artifacts.waveform;
-    if (waveform === 'fst') return ['--trace-fst'];
-    if (waveform === 'vcd') return ['--trace-vcd'];
+    const depth = target.options.traceDepth;
+    const depthArgs = typeof depth === 'number' ? ['--trace-depth', String(depth)] : [];
+    if (waveform === 'fst') return ['--trace-fst', ...depthArgs];
+    if (waveform === 'vcd') return ['--trace-vcd', ...depthArgs];
     return [];
   }
 

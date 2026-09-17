@@ -13,6 +13,7 @@ describe('hardware providers', () => {
     const capabilities = await registry.capabilities();
     expect(capabilities.find((item) => item.id === 'sby')).toMatchObject({ available: false, actions: expect.arrayContaining(['prove']) });
     expect(capabilities.find((item) => item.id === 'spike')).toMatchObject({ available: false, actions: ['trace'] });
+    expect(capabilities.find((item) => item.id === 'spike')?.optionSchema).toMatchObject({ isa: { type: 'string' }, maxInstructions: { type: 'integer' } });
   });
   it('constructs argument-array Yosys commands', async () => {
     const provider = new VerificationProvider('yosys', 'Yosys 1');
