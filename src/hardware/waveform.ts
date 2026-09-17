@@ -48,7 +48,7 @@ function pushTransition(signal: WaveSignal, time: number, value: string): void {
   if (signal.transitions.at(-1)?.value !== value) signal.transitions.push({ time, value });
 }
 
-export async function loadOrCreateVcdIndex(sourcePath: string, indexPath: string, expectedSha256: string): Promise<WaveIndex> {
+export async function loadOrCreateVcdIndex(sourcePath: string, indexPath: string, expectedSha256: string, maxIndexBytes = 512 * 1024 * 1024): Promise<WaveIndex> {
   try { const cached = JSON.parse(await readFile(indexPath, 'utf8')) as WaveIndex; if (cached.version === 1 && cached.sourceSha256 === expectedSha256) return cached; } catch {}
   let index: WaveIndex;
   if (sourcePath.toLowerCase().endsWith('.vcd')) index = parseVcd(await readFile(sourcePath, 'utf8'), expectedSha256);
@@ -60,7 +60,9 @@ export async function loadOrCreateVcdIndex(sourcePath: string, indexPath: string
       if (index.sourceSha256 !== expectedSha256) throw new Error('waveform checksum changed');
     } catch (error) { throw new RarsError('ARTIFACT_CORRUPT', 'Unable to index waveform', { cause: error instanceof Error ? error.message : String(error) }); }
   }
-  await writeFile(indexPath, `${JSON.stringify(index)}\n`, { mode: 0o600 });
+  const encoded = `${JSON.stringify(index)}\n`;
+  if (Buffer.byteLength(encoded) > maxIndexBytes) throw new RarsError('ARTIFACT_LIMIT_EXCEEDED', 'Waveform index exceeds the artifact quota', { maximum: maxIndexBytes });
+  await writeFile(indexPath, encoded, { mode: 0o600 });
   return index;
 }
 

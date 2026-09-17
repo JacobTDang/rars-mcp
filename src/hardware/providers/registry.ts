@@ -16,7 +16,7 @@ export function createProviderRegistry(options: { executableVersions: Record<str
     ['verilator', new VerilatorProvider(options.executableVersions.verilator ?? null)],
     ['ghdl', new GhdlProvider(options.executableVersions.ghdl ?? null)],
     ['repository-command', new RepositoryCommandProvider(options.allowRepositoryCommands)],
-    ...(['cocotb', 'yosys', 'sby', 'riscv-formal', 'spike'] as const).map((id) => [id, new VerificationProvider(id, options.executableVersions[id] ?? null)] as const),
+    ...(['cocotb', 'yosys', 'sby', 'riscv-formal', 'spike', 'rars-trace'] as const).map((id) => [id, new VerificationProvider(id, options.executableVersions[id] ?? null)] as const),
   ]);
   return {
     get(id) { const provider = providers.get(id); if (!provider) throw new RarsError('PROVIDER_UNAVAILABLE', `Unknown provider: ${id}`, { id }); return provider; },

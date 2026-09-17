@@ -1,6 +1,7 @@
 package dev.rarsmcp.sim;
 
 import rars.RISCVprogram;
+import rars.ProgramStatement;
 import rars.Globals;
 import rars.api.Options;
 import rars.api.Program;
@@ -85,6 +86,10 @@ public final class RarsSimulator {
     public synchronized void addBreakpoint(int address) { breakpoints.add(address); }
     public synchronized void removeBreakpoint(int address) { breakpoints.remove(address); }
     public synchronized Object readRegister(String name) { ensureLoaded(); return Integer.toUnsignedLong(program.getRegisterValue(name)); }
+    public synchronized long readInstruction(int address) throws Exception {
+        for (ProgramStatement statement : code().getMachineList()) if (statement.getAddress() == address) return Integer.toUnsignedLong(statement.getBinaryStatement());
+        throw new IllegalArgumentException("No instruction at address " + Integer.toUnsignedString(address));
+    }
     public synchronized void setRegister(String name, int value) { ensureLoaded(); program.setRegisterValue(name, value); }
 
     public synchronized Object readMemory(int address, int width) throws Exception {

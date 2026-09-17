@@ -1,14 +1,24 @@
 FROM node:22-bookworm-slim AS build
+ARG RARS_URL=https://github.com/TheThirdOne/rars/releases/download/v1.6/rars1_6.jar
+ARG RARS_SHA256=780f730eb457b1ba609e968accc2c8b77d8f92c3d9dbf30cc7fdb3cfb14e8c24
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl openjdk-17-jdk-headless && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/rars && curl -fsSL "$RARS_URL" -o /opt/rars/rars.jar \
+    && echo "$RARS_SHA256  /opt/rars/rars.jar" | sha256sum -c -
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json vitest.config.ts ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+COPY java ./java
+RUN npm run build \
+    && mkdir -p java/bridge/build/classes \
+    && javac --release 11 -cp /opt/rars/rars.jar -d java/bridge/build/classes $(find java/bridge/src/main/java -name '*.java' -print) \
+    && jar --create --file java/bridge/build/rars-mcp-bridge.jar -C java/bridge/build/classes . \
+    && npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends boolector ca-certificates curl g++ ghdl make procps python3 python3-dev python3-pip util-linux verilator yosys \
+    && apt-get install -y --no-install-recommends boolector ca-certificates curl g++ ghdl make openjdk-17-jre-headless procps python3 python3-dev python3-pip util-linux verilator yosys \
     && python3 -m pip install --no-cache-dir --break-system-packages cocotb==2.0.0 pywellen==0.25.6 pytest==8.4.2 \
     && curl -fsSL https://github.com/YosysHQ/sby/archive/refs/tags/v0.68.tar.gz -o /tmp/sby.tar.gz \
     && mkdir /tmp/sby && tar -xzf /tmp/sby.tar.gz -C /tmp/sby --strip-components=1 && make -C /tmp/sby install \
@@ -20,6 +30,8 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build /app/src/hardware/wave_index.py ./wave_index.py
+COPY --from=build /opt/rars/rars.jar /opt/rars/rars.jar
+COPY --from=build /app/java/bridge/build/rars-mcp-bridge.jar /opt/rars/rars-mcp-bridge.jar
 # The supervisor retains only the identity/file capabilities needed to create
 # private sandboxes. Provider processes are always demoted to per-slot UIDs.
 USER root

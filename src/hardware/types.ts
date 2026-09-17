@@ -69,6 +69,7 @@ export interface ResolvedTarget {
   includeDirs: string[];
   options: Record<string, unknown>;
   artifacts: Record<string, string>;
+  signalRoles?: Record<string, string>;
   command?: string[];
   effectiveLimits: HardwareLimits;
 }

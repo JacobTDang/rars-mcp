@@ -52,8 +52,8 @@ export function compareTraces(left: ArchitecturalEvent[], right: ArchitecturalEv
     const a = left[i]; const b = right[i]; const fields: string[] = [];
     if (!a || !b) fields.push('trace_length');
     else {
-      if (a.instructionBits !== b.instructionBits) fields.push('instructionBits');
-      if (a.pcBefore !== b.pcBefore) fields.push('pcBefore'); if (a.pcAfter !== b.pcAfter) fields.push('pcAfter');
+      if (!sameHex(a.instructionBits, b.instructionBits)) fields.push('instructionBits');
+      if (!sameHex(a.pcBefore, b.pcBefore)) fields.push('pcBefore'); if (!sameHex(a.pcAfter, b.pcAfter)) fields.push('pcAfter');
       if (effective.compareRegisters && JSON.stringify(normalizeDestination(a, effective.ignoreX0Writes)) !== JSON.stringify(normalizeDestination(b, effective.ignoreX0Writes))) fields.push('destinationRegister');
       if (effective.compareMemory && JSON.stringify(a.memory ?? null) !== JSON.stringify(b.memory ?? null)) fields.push('memory');
       if (effective.compareTraps && (a.trap !== b.trap || a.interrupt !== b.interrupt || a.halt !== b.halt)) fields.push('trap');
@@ -64,6 +64,8 @@ export function compareTraces(left: ArchitecturalEvent[], right: ArchitecturalEv
   return { equal: true, comparedEvents: count };
 }
 
-function normalizeDestination(event: ArchitecturalEvent, ignoreX0: boolean): unknown { return ignoreX0 && event.destinationRegister?.address === 0 ? null : event.destinationRegister ?? null; }
+function normalizeDestination(event: ArchitecturalEvent, ignoreX0: boolean): unknown { return ignoreX0 && event.destinationRegister?.address === 0 ? null : event.destinationRegister ? { ...event.destinationRegister, value: canonicalHex(event.destinationRegister.value) } : null; }
 function optionalNumber(value: unknown): number | undefined { return value === undefined ? undefined : Number(value); }
 function hex(value: unknown): string { if (typeof value === 'string') return value.toLowerCase().startsWith('0x') ? value.toLowerCase() : `0x${value.toLowerCase()}`; if (typeof value === 'bigint') return `0x${value.toString(16)}`; return `0x${Number(value ?? 0).toString(16)}`; }
+function canonicalHex(value: string): string { return `0x${value.toLowerCase().replace(/^0x/u, '').replace(/^0+(?=[0-9a-f])/u, '')}`; }
+function sameHex(left: string, right: string): boolean { return canonicalHex(left) === canonicalHex(right); }

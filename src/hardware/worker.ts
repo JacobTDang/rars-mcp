@@ -145,7 +145,10 @@ export async function createHardwareWorker(config: HardwareWorkerConfig): Promis
           if (!artifact) throw new RarsError('ARTIFACT_CORRUPT', 'Waveform artifact does not exist for this job');
           const source = join(config.stateRoot, 'executions', id, 'artifacts', artifact.path);
           const indexPath = join(config.stateRoot, 'jobs', id, `wave-${artifact.id}.json`);
-          return json(queryWave(await loadOrCreateVcdIndex(source, indexPath, artifact.sha256), body));
+          const index = await loadOrCreateVcdIndex(source, indexPath, artifact.sha256, (job.request.resolvedTarget?.effectiveLimits.artifactMb ?? config.limits.artifactMb) * 1024 * 1024);
+          const roles = job.request.resolvedTarget?.signalRoles ?? {};
+          for (const signal of index.signals) { const role = roles[signal.path] ?? roles[signal.name]; if (role !== undefined) signal.role = role; }
+          return json(queryWave(index, body));
         }
         if (request.method === 'POST' && url.pathname === '/trace/compare') {
           const body = await request.json() as { left: { jobId: string; artifactId: string; format: TraceFormat }; right: { jobId: string; artifactId: string; format: TraceFormat }; policy?: TracePolicy; context?: number };

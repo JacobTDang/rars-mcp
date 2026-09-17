@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     token,
     allowRepositoryCommands: config.hardware.allowRepositoryCommands,
     limits: config.hardware.limits,
-    executableVersions: { verilator: version('verilator'), ghdl: version('ghdl'), cocotb: version('cocotb-config'), yosys: version('yosys'), sby: version('sby'), 'riscv-formal': version('sby'), spike: version('spike') },
+    executableVersions: { verilator: version('verilator'), ghdl: version('ghdl'), cocotb: version('cocotb-config'), yosys: version('yosys'), sby: version('sby'), 'riscv-formal': version('sby'), spike: version('spike'), 'rars-trace': 'RARS 1.6' },
   });
   const handler = toNodeHandler(worker);
   const server = createServer((request, response) => void handler(request as never, response as never));
