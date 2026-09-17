@@ -15,6 +15,8 @@ describe('MCP server', () => {
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining([
       'rars_assemble', 'rars_run', 'rars_session_list', 'rars_session_close',
+      'hardware_capabilities', 'hardware_project_validate', 'hardware_job_start',
+      'hardware_job_status', 'hardware_job_cancel', 'hardware_job_logs', 'hardware_artifact_list',
     ]));
     await client.close();
     await server.close();

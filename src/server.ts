@@ -2,9 +2,12 @@ import { McpServer } from '@modelcontextprotocol/server';
 
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
+import { createHardwareToolHandlers } from './hardware/tool-handlers.js';
+import { hardwareCapabilitiesSchema, hardwareJobIdSchema, hardwareJobLogsSchema, hardwareJobStartSchema, hardwareProjectValidateSchema } from './hardware/tool-schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
+  const hardware = createHardwareToolHandlers(dependencies.hardwareClient);
   const server = new McpServer(
     { name: 'rars-mcp', version: '0.1.0' },
     { instructions: 'All file paths are relative to the configured workspace. Headless calls are isolated.' },
@@ -44,5 +47,12 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('rars_live_command', {
     description: 'Load, inspect, modify, or drive the visible RARS desktop session. This mutates the open GUI.', inputSchema: liveCommandSchema,
   }, handlers.liveCommand);
+  server.registerTool('hardware_capabilities', { description: 'List installed hardware providers, versions, actions, formats, and limits.', inputSchema: hardwareCapabilitiesSchema }, hardware.capabilities);
+  server.registerTool('hardware_project_validate', { description: 'Validate a hardware project manifest and resolved source set without execution.', inputSchema: hardwareProjectValidateSchema }, hardware.projectValidate);
+  server.registerTool('hardware_job_start', { description: 'Start an asynchronous hardware compile, simulation, test, or course-flow job.', inputSchema: hardwareJobStartSchema }, hardware.jobStart);
+  server.registerTool('hardware_job_status', { description: 'Read persistent hardware job state and result metadata.', inputSchema: hardwareJobIdSchema }, hardware.jobStatus);
+  server.registerTool('hardware_job_cancel', { description: 'Cancel a queued or running hardware job.', inputSchema: hardwareJobIdSchema }, hardware.jobCancel);
+  server.registerTool('hardware_job_logs', { description: 'Read a bounded byte window from hardware job logs.', inputSchema: hardwareJobLogsSchema }, hardware.jobLogs);
+  server.registerTool('hardware_artifact_list', { description: 'List immutable artifacts produced by a hardware job.', inputSchema: hardwareJobIdSchema }, hardware.artifactList);
   return server;
 }

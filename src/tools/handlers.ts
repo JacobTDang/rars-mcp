@@ -7,6 +7,7 @@ import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
 import { discoverLiveSession } from '../live/discovery.js';
 import type { AssembleInput, CloseSessionInput, DebugCommandInput, DebugStartInput, InspectInput, LiveCommandInput, ModifyInput, RunInput } from './schemas.js';
+import type { HardwareClient } from '../hardware/client.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -20,6 +21,7 @@ export interface ToolDependencies {
   bridgeToken?: string;
   bridgeHost?: string;
   liveDiscoveryDir?: string;
+  hardwareClient?: HardwareClient;
 }
 
 export type ToolResult = CallToolResult;

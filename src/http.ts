@@ -11,6 +11,7 @@ import { createMcpServer } from './server.js';
 import { SessionStore } from './sessions/store.js';
 import type { ToolDependencies } from './tools/handlers.js';
 import { Workspace } from './workspace.js';
+import { HardwareClient } from './hardware/client.js';
 
 export interface HttpHandler {
   fetch(request: Request): Promise<Response>;
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const workspace = await Workspace.create(config.workspaceRoot);
   const sessions = new SessionStore();
+  const hardwareClient = config.hardware.enabled && config.hardware.workerToken
+    ? new HardwareClient({ baseUrl: config.hardware.workerUrl, token: config.hardware.workerToken, timeoutMs: config.executionTimeoutMs })
+    : undefined;
   const handler = createHttpHandler({
     workspace,
     sessions,
@@ -53,6 +57,7 @@ async function main(): Promise<void> {
     bridgeToken: process.env.RARS_HEADLESS_BRIDGE_TOKEN ?? 'internal-headless-bridge',
     bridgeHost: config.bridgeHost,
     liveDiscoveryDir: config.liveDiscoveryDir,
+    ...(hardwareClient === undefined ? {} : { hardwareClient }),
   });
   const nodeHandler = toNodeHandler(handler);
   const port = Number(process.env.PORT ?? '3000');
