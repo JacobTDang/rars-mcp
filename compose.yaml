@@ -15,8 +15,56 @@ services:
       RARS_MAX_OUTPUT_BYTES: "1048576"
       RARS_MAX_INSPECTION_BYTES: "65536"
       RARS_BRIDGE_HOST: "host.docker.internal"
+      HARDWARE_ENABLED: "true"
+      HARDWARE_WORKER_URL: "http://hardware-worker:3010"
+      HARDWARE_WORKER_TOKEN: "local-compose-hardware-token"
+    networks:
+      - default
+      - hardware-internal
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  hardware-worker:
+    profiles: ["rtl"]
+    build:
+      context: .
+      dockerfile: Dockerfile.hardware
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    volumes:
+      - ./workspace:/workspace:ro
+      - hardware-state:/state
+    environment:
+      HARDWARE_WORKER_TOKEN: "local-compose-hardware-token"
+      HARDWARE_ALLOW_REPOSITORY_COMMANDS: "false"
+      HARDWARE_MAX_WALL_TIME_SECONDS: "120"
+      HARDWARE_MAX_MEMORY_MB: "2048"
+      HARDWARE_MAX_PIDS: "256"
+      HARDWARE_MAX_OUTPUT_BYTES: "4194304"
+      HARDWARE_MAX_ARTIFACT_MB: "512"
+    networks:
+      - hardware-internal
+    mem_limit: 2304m
+    pids_limit: 300
+    cpus: 2.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  hardware-state:
+
+networks:
+  hardware-internal:
+    internal: true

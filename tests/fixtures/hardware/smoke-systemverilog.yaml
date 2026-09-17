@@ -1,0 +1,10 @@
+version: 1
+name: sv-adder
+sources: [sv/rtl/**/*.sv]
+targets:
+  unit:
+    provider: verilator
+    language: systemverilog
+    standard: "1800-2017"
+    top: adder
+    action: lint

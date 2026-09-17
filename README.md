@@ -45,3 +45,13 @@ The launcher opens RARS and creates protected discovery files in the ignored `.r
 View logs with `docker compose logs -f`. Stop with `docker compose down`. Change bounded execution defaults in `compose.yaml`. Rebuild after an update with `docker compose build --no-cache && docker compose up -d`.
 
 See `docs/security.md` before changing network bindings or workspace mounts, and `docs/troubleshooting.md` for recovery steps.
+
+## Optional hardware harness
+
+Start the VHDL/SystemVerilog worker with:
+
+```sh
+docker compose --profile rtl up -d --build
+```
+
+Projects use a `hardware.project.yaml` manifest inside `workspace/`. The MCP tools `hardware_project_validate`, `hardware_job_start`, `hardware_job_status`, `hardware_job_cancel`, `hardware_job_logs`, and `hardware_artifact_list` provide asynchronous access to GHDL and Verilator. See `docs/hardware-harness.md`.

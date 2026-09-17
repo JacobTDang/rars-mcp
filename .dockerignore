@@ -4,3 +4,5 @@ dist
 .cache
 workspace
 docs/superpowers
+.worktrees
+.runtime

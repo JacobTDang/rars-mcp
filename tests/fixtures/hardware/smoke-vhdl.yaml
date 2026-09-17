@@ -1,0 +1,10 @@
+version: 1
+name: vhdl-adder
+sources: [vhdl/rtl/**/*.vhd]
+targets:
+  unit:
+    provider: ghdl
+    language: vhdl
+    standard: "08"
+    top: adder
+    action: analyze
