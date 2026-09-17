@@ -1,0 +1,11 @@
+version: 1
+name: rars-trace-smoke
+sources: ["rars/program.s"]
+targets:
+  trace:
+    provider: rars-trace
+    language: riscv
+    action: trace
+    top: rars/program.s
+    parameters: { max_steps: 20 }
+    artifacts: {}
