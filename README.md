@@ -54,4 +54,4 @@ Start the VHDL/SystemVerilog worker with:
 docker compose --profile rtl up -d --build
 ```
 
-Projects use a `hardware.project.yaml` manifest inside `workspace/`. The MCP tools `hardware_project_validate`, `hardware_job_start`, `hardware_job_status`, `hardware_job_cancel`, `hardware_job_logs`, and `hardware_artifact_list` provide asynchronous access to GHDL and Verilator. See `docs/hardware-harness.md`.
+Projects use a `hardware.project.yaml` manifest inside `workspace/`. Hardware MCP tools provide asynchronous Verilator/GHDL execution, bounded VCD/FST/GHW queries, RARS/RVFI trace comparison, seeded RISC-V tests, and optional cocotb/Yosys/SBY/Spike flows. See `docs/hardware-harness.md`.

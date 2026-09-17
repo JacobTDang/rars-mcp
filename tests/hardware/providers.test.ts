@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import { createProviderRegistry } from '../../src/hardware/providers/registry.js';
+import { VerificationProvider } from '../../src/hardware/providers/verification.js';
 import type { ProviderContext, ResolvedTarget } from '../../src/hardware/types.js';
 
 const limits = { concurrency: 1, wallTimeSeconds: 30, memoryMb: 128, pids: 32, outputBytes: 1024, artifactMb: 1, sourceFiles: 10, sourceBytes: 1024 };
 const context = (target: ResolvedTarget): ProviderContext => ({ target, snapshotRoot: '/snapshot', buildRoot: '/build', artifactRoot: '/artifacts' });
 
 describe('hardware providers', () => {
+  it('reports optional verification and reference providers without silently enabling missing tools', async () => {
+    const registry = createProviderRegistry({ executableVersions: {}, allowRepositoryCommands: false });
+    const capabilities = await registry.capabilities();
+    expect(capabilities.find((item) => item.id === 'sby')).toMatchObject({ available: false, actions: expect.arrayContaining(['prove']) });
+    expect(capabilities.find((item) => item.id === 'spike')).toMatchObject({ available: false, actions: ['trace'] });
+  });
+  it('constructs argument-array Yosys commands', async () => {
+    const provider = new VerificationProvider('yosys', 'Yosys 1');
+    const target = { name: 'synth', provider: 'yosys', action: 'synthesize', language: 'verilog', top: 'flow.ys', sources: ['flow.ys'], parameters: {}, defines: [], includeDirs: [], options: {}, artifacts: {}, effectiveLimits: limits };
+    expect((await provider.commands({ target, snapshotRoot: '/source', buildRoot: '/build', artifactRoot: '/artifacts' }))[0]).toMatchObject({ executable: 'yosys', args: ['-l', '/artifacts/yosys.log', '-s', '/source/flow.ys'] });
+  });
   it('builds exact Verilator lint arguments', async () => {
     const registry = createProviderRegistry({ executableVersions: { verilator: '5.0', ghdl: '4.0' }, allowRepositoryCommands: true });
     const target: ResolvedTarget = { name: 'lint', provider: 'verilator', action: 'lint', language: 'systemverilog', standard: '1800-2017', top: 'adder', sources: ['rtl/adder.sv'], parameters: {}, defines: [], includeDirs: [], options: {}, artifacts: {}, effectiveLimits: limits };
