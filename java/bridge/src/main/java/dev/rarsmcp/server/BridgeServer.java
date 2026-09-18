@@ -108,6 +108,7 @@ public final class BridgeServer {
                     memory.add(mapOf("address", address, "width", width, "value", simulator.readMemory(address, width)));
                 }
                 result.put("memory", memory);
+                if (Boolean.TRUE.equals(payload.get("includeSymbols"))) result.put("symbols", simulator.symbols());
                 return BridgeResponse.success(request.id, result);
             }
             case "modify":

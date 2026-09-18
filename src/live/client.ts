@@ -33,7 +33,11 @@ export class LiveClient implements SessionBackend {
     const result = await this.request('command', { ...command }); this.update(result); return result as unknown as MachineState;
   }
   async inspect(request: InspectRequest): Promise<unknown> {
-    return this.request('inspect', { registers: request.registers ?? [], memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })) });
+    return this.request('inspect', {
+      registers: request.registers ?? [],
+      memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
+      includeSymbols: request.includeSymbols ?? false,
+    });
   }
   async modify(request: ModifyRequest): Promise<MachineState> {
     const result = await this.request('modify', { registers: request.registers ?? {}, memory: request.memory ?? [] }); this.update(result); return result as unknown as MachineState;

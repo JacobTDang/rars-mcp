@@ -31,6 +31,43 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     expect(session.isClosed()).toBe(true);
   });
 
+  it('reads pc and names an unknown register in the error', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    const state = await session.inspect({ registers: ['pc'] }) as { programCounter: number; registers: { pc: number } };
+    expect(state.registers.pc).toBe(state.programCounter);
+    await expect(session.inspect({ registers: ['nope'] })).rejects.toThrow('Unknown register: nope');
+    await session.close();
+  });
+
+  it('returns symbols only when they are requested', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    const withSymbols = await session.inspect({ includeSymbols: true }) as { programCounter: number; symbols: unknown[] };
+    expect(withSymbols.symbols).toEqual([
+      { name: 'main', address: withSymbols.programCounter, type: 'text', global: false },
+      { name: 'value', address: 0x10010000, type: 'data', global: false },
+    ]);
+    expect(await session.inspect({})).not.toHaveProperty('symbols');
+    await session.close();
+  });
+
+  it('reports the RARS assembly errors when a debug program fails to assemble', async () => {
+    await expect(HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/invalid.asm')], timeoutMs: 3_000,
+    })).rejects.toThrow(/invalid\.asm line 3.*definitely_not_an_instruction/);
+  });
+
   it('rejects a wrong authentication token', async () => {
     await expect(HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),

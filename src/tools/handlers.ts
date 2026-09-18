@@ -2,11 +2,12 @@ import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
 import type { SessionStore } from '../sessions/store.js';
+import type { DebugCommand } from '../sessions/types.js';
 import type { Workspace } from '../workspace.js';
 import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
 import { discoverLiveSession } from '../live/discovery.js';
-import type { AssembleInput, CloseSessionInput, DebugCommandInput, DebugStartInput, InspectInput, LiveCommandInput, ModifyInput, RunInput } from './schemas.js';
+import { isBreakpointAction, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -86,7 +87,14 @@ export function createToolHandlers(deps: ToolDependencies) {
       return { content: [{ type: 'text', text: `Started RARS debug session ${sessionId}` }], structuredContent: { sessionId, ...(await backend.summary()) } };
     },
     debugCommand: async (input: DebugCommandInput): Promise<ToolResult> => {
-      const { sessionId, ...command } = input;
+      const { sessionId, action, address } = input;
+      let command: DebugCommand;
+      if (isBreakpointAction(action)) {
+        if (address === undefined) throw new Error(`address is required for ${action}`);
+        command = { action, address };
+      } else {
+        command = { action };
+      }
       const state = await deps.sessions.get(sessionId).command(command);
       return { content: [{ type: 'text', text: `Applied ${input.action} to ${sessionId}` }], structuredContent: state as unknown as Record<string, unknown> };
     },

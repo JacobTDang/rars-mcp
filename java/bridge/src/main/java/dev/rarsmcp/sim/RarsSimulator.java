@@ -1,16 +1,24 @@
 package dev.rarsmcp.sim;
 
+import rars.AssemblyException;
 import rars.RISCVprogram;
 import rars.Globals;
 import rars.api.Options;
 import rars.api.Program;
+import rars.assembler.Symbol;
+import rars.assembler.SymbolTable;
+import rars.riscv.hardware.ControlAndStatusRegisterFile;
+import rars.riscv.hardware.FloatingPointRegisterFile;
 import rars.riscv.hardware.Memory;
 import rars.riscv.hardware.RegisterFile;
 import rars.simulator.BackStepper;
 import rars.simulator.Simulator;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +29,7 @@ public final class RarsSimulator {
     private Program program;
     private Options options;
     private List<String> files = new ArrayList<>();
+    private List<RISCVprogram> sources = new ArrayList<>();
     private List<String> arguments = new ArrayList<>();
     private String stdin = "";
     private String status = "ready";
@@ -34,8 +43,32 @@ public final class RarsSimulator {
         files = new ArrayList<>(sourceFiles);
         arguments = new ArrayList<>(programArguments);
         stdin = standardInput;
-        program.assemble(new ArrayList<>(files), files.get(0));
+        sources = assemble(files);
         setup();
+    }
+
+    // Same steps as Program.assemble(files, main), but keeps each file's program
+    // so its local symbol table is still reachable after assembly.
+    private ArrayList<RISCVprogram> assemble(List<String> sourceFiles) throws Exception {
+        try {
+            ArrayList<RISCVprogram> programs = code().prepareFilesForAssembly(new ArrayList<>(sourceFiles), sourceFiles.get(0), null);
+            Method assemble = Program.class.getDeclaredMethod("assemble", ArrayList.class);
+            assemble.setAccessible(true);
+            assemble.invoke(program, programs);
+            return programs;
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof AssemblyException) throw assemblyFailure((AssemblyException) cause);
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw (Error) cause;
+        } catch (AssemblyException error) {
+            throw assemblyFailure(error);
+        }
+    }
+
+    // AssemblyException carries no message of its own; the details are in its error list.
+    private static IllegalArgumentException assemblyFailure(AssemblyException error) {
+        return new IllegalArgumentException(error.errors().generateErrorReport().trim());
     }
 
     private void setup() throws Exception {
@@ -84,8 +117,51 @@ public final class RarsSimulator {
     public synchronized Map<String, Object> reset() throws Exception { setup(); return snapshot(); }
     public synchronized void addBreakpoint(int address) { breakpoints.add(address); }
     public synchronized void removeBreakpoint(int address) { breakpoints.remove(address); }
-    public synchronized Object readRegister(String name) { ensureLoaded(); return Integer.toUnsignedLong(program.getRegisterValue(name)); }
-    public synchronized void setRegister(String name, int value) { ensureLoaded(); program.setRegisterValue(name, value); }
+    public synchronized Object readRegister(String name) {
+        ensureLoaded();
+        if (name.equals("pc")) return Integer.toUnsignedLong(RegisterFile.getProgramCounter());
+        requireKnownRegister(name);
+        return Integer.toUnsignedLong(program.getRegisterValue(name));
+    }
+
+    public synchronized void setRegister(String name, int value) {
+        ensureLoaded();
+        if (name.equals("pc")) { RegisterFile.setProgramCounter(value); return; }
+        requireKnownRegister(name);
+        program.setRegisterValue(name, value);
+    }
+
+    // RARS looks names up in the integer, floating-point, then CSR files and
+    // throws a bare NullPointerException when none of them has the name.
+    private static void requireKnownRegister(String name) {
+        if (RegisterFile.getRegister(name) == null && FloatingPointRegisterFile.getRegister(name) == null
+                && ControlAndStatusRegisterFile.getRegister(name) == null) {
+            throw new IllegalArgumentException("Unknown register: " + name);
+        }
+    }
+
+    public synchronized List<Map<String, Object>> symbols() {
+        ensureLoaded();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (RISCVprogram source : sources) addSymbols(result, source.getLocalSymbolTable(), false);
+        addSymbols(result, Globals.symbolTable, true);
+        result.sort(Comparator.comparingLong(symbol -> (Long) symbol.get("address")));
+        return result;
+    }
+
+    private static void addSymbols(List<Map<String, Object>> result, SymbolTable table, boolean global) {
+        for (Symbol symbol : table.getTextSymbols()) result.add(symbol(symbol, "text", global));
+        for (Symbol symbol : table.getDataSymbols()) result.add(symbol(symbol, "data", global));
+    }
+
+    private static Map<String, Object> symbol(Symbol symbol, String type, boolean global) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("name", symbol.getName());
+        result.put("address", Integer.toUnsignedLong(symbol.getAddress()));
+        result.put("type", type);
+        result.put("global", global);
+        return result;
+    }
 
     public synchronized Object readMemory(int address, int width) throws Exception {
         ensureLoaded();

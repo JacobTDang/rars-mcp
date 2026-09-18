@@ -21,10 +21,24 @@ export const debugStartSchema = z.object({
   programArgs: z.array(z.string()).optional(),
   stdin: z.string().optional(),
 });
-export const debugCommandSchema = z.discriminatedUnion('action', [
-  z.object({ sessionId: z.string().uuid(), action: z.enum(['step', 'backstep', 'continue', 'pause', 'reset', 'terminate']) }),
-  z.object({ sessionId: z.string().uuid(), action: z.enum(['breakpoint_add', 'breakpoint_remove']), address: z.string() }),
-]);
+const executionActions = ['step', 'backstep', 'continue', 'pause', 'reset', 'terminate'] as const;
+const breakpointActions = ['breakpoint_add', 'breakpoint_remove'] as const;
+export const isBreakpointAction = (action: string): action is typeof breakpointActions[number] =>
+  (breakpointActions as readonly string[]).includes(action);
+// Kept as one flat object: clients that require a plain top-level object schema
+// flatten a top-level union and lose every variant but the first.
+export const debugCommandSchema = z.object({
+  sessionId: z.string().uuid(),
+  action: z.enum([...executionActions, ...breakpointActions]),
+  address: z.string().optional(),
+}).superRefine((input, context) => {
+  if (isBreakpointAction(input.action) && input.address === undefined) {
+    context.addIssue({ code: 'custom', path: ['address'], message: `address is required for ${input.action}` });
+  }
+  if (!isBreakpointAction(input.action) && input.address !== undefined) {
+    context.addIssue({ code: 'custom', path: ['address'], message: 'address is only valid for breakpoint_add and breakpoint_remove' });
+  }
+});
 export const inspectSchema = z.object({
   sessionId: z.string().uuid(),
   registers: z.array(z.string()).optional(),
