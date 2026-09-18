@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import type { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
 type JsonRpcMessage = Record<string, unknown>;
@@ -16,9 +17,21 @@ export async function parseSseResponse(response: Response): Promise<JsonRpcMessa
     .map((line) => JSON.parse(line.slice(5).trim()) as JsonRpcMessage);
 }
 
-export async function proxyStdio(endpoint = process.env.RARS_MCP_URL ?? 'http://127.0.0.1:3000/mcp'): Promise<void> {
+// fetch reports network failures as "fetch failed" with the real reason, such as ECONNREFUSED, in its cause.
+function describeFailure(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (!(error.cause instanceof Error)) return error.message;
+  const code = (error.cause as { code?: unknown }).code;
+  return `${error.message} (${typeof code === 'string' ? code : error.cause.message})`;
+}
+
+export async function proxyStdio(
+  endpoint = process.env.RARS_MCP_URL ?? 'http://127.0.0.1:3000/mcp',
+  source: Readable = process.stdin,
+  sink: Writable = process.stdout,
+): Promise<void> {
   let sessionId: string | undefined;
-  const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const input = createInterface({ input: source, crlfDelay: Infinity });
   for await (const line of input) {
     if (!line.trim()) continue;
     try {
@@ -31,13 +44,14 @@ export async function proxyStdio(endpoint = process.env.RARS_MCP_URL ?? 'http://
       const response = await fetch(endpoint, { method: 'POST', headers, body: line });
       sessionId = response.headers.get('mcp-session-id') ?? sessionId;
       for (const message of await parseSseResponse(response)) {
-        process.stdout.write(`${JSON.stringify(message)}\n`);
+        sink.write(`${JSON.stringify(message)}\n`);
       }
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      const message = `MCP proxy request to ${endpoint} failed: ${describeFailure(error)}`;
+      console.error(message);
       const parsed = (() => { try { return JSON.parse(line) as JsonRpcMessage; } catch { return {}; } })();
       if ('id' in parsed) {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32603, message: 'MCP proxy request failed' } })}\n`);
+        sink.write(`${JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32603, message } })}\n`);
       }
     }
   }
