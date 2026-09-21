@@ -39,6 +39,17 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     expect(session.isClosed()).toBe(true);
   });
 
+  it('reports a step-limit stop on continue', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/infinite.asm')], timeoutMs: 3_000,
+    });
+
+    expect(await session.command({ action: 'continue', maxSteps: 50 })).toMatchObject({ status: 'paused', stopReason: 'step_limit' });
+    await session.close();
+  });
+
   it('reads pc and names an unknown register in the error', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),

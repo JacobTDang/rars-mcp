@@ -27,6 +27,27 @@ public final class RarsSimulatorSelfTest {
         simulator.reset();
         require(pc(simulator.snapshot()) == initialPc, "reset");
 
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        require("step".equals(simulator.step().get("stopReason")), "step reason");
+        simulator.addBreakpoint((int) initialPc + 8);
+        Map<String, Object> atBreakpoint = simulator.runUntilStop(1000);
+        require("breakpoint".equals(atBreakpoint.get("stopReason")) && pc(atBreakpoint) == initialPc + 8, "breakpoint reason");
+        simulator.removeBreakpoint((int) initialPc + 8);
+        Map<String, Object> exited = simulator.runUntilStop(1000);
+        require("exited".equals(exited.get("stopReason")) && "terminated".equals(exited.get("status")), "exit reason");
+
+        simulator.load(Arrays.asList("tests/fixtures/infinite.asm"), Collections.emptyList(), "");
+        Map<String, Object> limited = simulator.runUntilStop(100);
+        require("step_limit".equals(limited.get("stopReason")) && "paused".equals(limited.get("status")), "step limit reason");
+
+        simulator.load(Arrays.asList("tests/fixtures/dropoff.asm"), Collections.emptyList(), "");
+        require("ran_off_end".equals(simulator.runUntilStop(1000).get("stopReason")), "ran off end reason");
+
+        simulator.load(Arrays.asList("tests/fixtures/fault.asm"), Collections.emptyList(), "");
+        Map<String, Object> faulted = simulator.runUntilStop(1000);
+        require("exception".equals(faulted.get("stopReason")) && "terminated".equals(faulted.get("status")), "exception reason");
+        require(String.valueOf(faulted.get("exception")).contains("Load address not aligned"), "exception message");
+
         simulator.load(Arrays.asList("tests/fixtures/debug.asm", "tests/fixtures/debug-helper.asm"), Collections.emptyList(), "");
         List<Map<String, Object>> symbols = simulator.symbols();
         requireSymbol(symbols, "main", "text", false, initialPc);

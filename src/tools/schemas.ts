@@ -32,7 +32,11 @@ export const debugCommandSchema = z.object({
   sessionId: z.string().uuid(),
   action: z.enum([...executionActions, ...breakpointActions]),
   address: z.string().optional(),
+  maxSteps: z.number().int().positive().optional(),
 }).superRefine((input, context) => {
+  if (input.action !== 'continue' && input.maxSteps !== undefined) {
+    context.addIssue({ code: 'custom', path: ['maxSteps'], message: 'maxSteps is only valid for continue' });
+  }
   if (isBreakpointAction(input.action) && input.address === undefined) {
     context.addIssue({ code: 'custom', path: ['address'], message: `address is required for ${input.action}` });
   }

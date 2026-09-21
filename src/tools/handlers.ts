@@ -95,11 +95,13 @@ export function createToolHandlers(deps: ToolDependencies) {
       return { content: [{ type: 'text', text: `Started RARS debug session ${sessionId}` }], structuredContent: { sessionId, ...(await backend.summary()) } };
     },
     debugCommand: async (input: DebugCommandInput): Promise<ToolResult> => {
-      const { sessionId, action, address } = input;
+      const { sessionId, action, address, maxSteps } = input;
       let command: DebugCommand;
       if (isBreakpointAction(action)) {
         if (address === undefined) throw new Error(`address is required for ${action}`);
         command = { action, address };
+      } else if (action === 'continue') {
+        command = maxSteps === undefined ? { action } : { action, maxSteps };
       } else {
         command = { action };
       }
