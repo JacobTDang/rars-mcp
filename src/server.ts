@@ -5,9 +5,13 @@ import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchem
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
+  const folders = dependencies.workspace.roots.join(', ');
   const server = new McpServer(
     { name: 'rars-mcp', version: '0.1.0' },
-    { instructions: 'All file paths are relative to the configured workspace. Headless calls are isolated.' },
+    {
+      instructions: `Workspace folders: ${folders}. Relative file paths resolve against the first folder; `
+        + 'absolute paths may point into any of them. Headless calls are isolated.',
+    },
   );
 
   server.registerTool('rars_assemble', {

@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { RarsError } from './errors.js';
 
@@ -7,24 +7,41 @@ export interface ResolveOptions {
   allowMissing?: boolean;
 }
 
-export class Workspace {
-  readonly root: string;
+function contains(root: string, candidate: string): boolean {
+  const pathFromRoot = relative(root, candidate);
+  return pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot);
+}
 
-  private constructor(root: string) {
-    this.root = root;
+export class Workspace {
+  // Canonical folders. Relative paths resolve against the first, and RARS runs there.
+  readonly roots: readonly string[];
+  // The same folders as configured, before symlinks are resolved.
+  private readonly configuredRoots: readonly string[];
+
+  private constructor(configuredRoots: string[], roots: string[]) {
+    this.configuredRoots = configuredRoots;
+    this.roots = roots;
   }
 
-  static async create(root: string): Promise<Workspace> {
-    return new Workspace(await realpath(root));
+  get root(): string {
+    return this.roots[0]!;
+  }
+
+  static async create(...roots: string[]): Promise<Workspace> {
+    if (roots.length === 0) {
+      throw new RarsError('INVALID_CONFIGURATION', 'A workspace needs at least one folder', {});
+    }
+    const configured = roots.map((root) => resolve(root));
+    return new Workspace(configured, await Promise.all(configured.map((root) => realpath(root))));
   }
 
   async resolve(requestedPath: string, options: ResolveOptions = {}): Promise<string> {
-    const candidate = resolve(
-      this.root,
-      isAbsolute(requestedPath) ? relative(this.root, requestedPath) : requestedPath,
-    );
+    const candidate = isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(this.root, requestedPath);
 
-    this.assertContained(candidate, requestedPath);
+    // Checked before touching the filesystem, so an outside path never reveals whether it exists.
+    if (![...this.configuredRoots, ...this.roots].some((root) => contains(root, candidate))) {
+      this.outside(requestedPath);
+    }
 
     let canonicalCandidate: string;
     try {
@@ -41,18 +58,15 @@ export class Workspace {
       canonicalCandidate = join(canonicalParent, candidate.slice(dirname(candidate).length + 1));
     }
 
-    this.assertContained(canonicalCandidate, requestedPath);
+    if (!this.roots.some((root) => contains(root, canonicalCandidate))) this.outside(requestedPath);
     return canonicalCandidate;
   }
 
-  private assertContained(candidate: string, requestedPath: string): void {
-    const pathFromRoot = relative(this.root, candidate);
-    if (pathFromRoot === '..' || pathFromRoot.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(pathFromRoot)) {
-      throw new RarsError(
-        'PATH_OUTSIDE_WORKSPACE',
-        `Workspace path escapes the configured root: ${requestedPath}`,
-        { path: requestedPath },
-      );
-    }
+  private outside(requestedPath: string): never {
+    throw new RarsError(
+      'PATH_OUTSIDE_WORKSPACE',
+      `Workspace path is outside the configured workspace folders: ${requestedPath}`,
+      { path: requestedPath },
+    );
   }
 }

@@ -1,6 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -13,7 +13,7 @@ describe('loadConfig', () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'rars-config-'));
 
     expect(loadConfig({ RARS_WORKSPACE: workspaceRoot })).toMatchObject({
-      workspaceRoot,
+      workspaceRoots: [workspaceRoot],
       executionTimeoutMs: 10_000,
       maxOutputBytes: 1_048_576,
       maxInspectionBytes: 65_536,
@@ -29,6 +29,17 @@ describe('loadConfig', () => {
       liveDiscoveryDir: join(repositoryRoot, '.runtime'),
       bridgeHost: '127.0.0.1',
     });
+  });
+
+  it('splits RARS_WORKSPACE into several folders', () => {
+    const first = mkdtempSync(join(tmpdir(), 'rars-config-'));
+    const second = mkdtempSync(join(tmpdir(), 'rars-config-'));
+
+    expect(loadConfig({ RARS_WORKSPACE: `${first}${delimiter}${second}` }).workspaceRoots).toEqual([first, second]);
+  });
+
+  it('rejects a workspace list with no folders', () => {
+    expect(() => loadConfig({ RARS_WORKSPACE: delimiter })).toThrow('RARS_WORKSPACE must name at least one folder');
   });
 
   it('rejects a non-positive execution timeout', () => {

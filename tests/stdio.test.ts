@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp } from 'node:fs/promises';
+import { copyFile, mkdtemp, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -23,10 +23,11 @@ class StreamTransport implements Transport {
   async close(): Promise<void> { this.onclose?.(); }
 }
 
-async function connect(workspace: string) {
+async function connect(workspace?: string) {
   const toServer = new PassThrough();
   const toClient = new PassThrough();
-  const server = await startStdioServer({ env: { RARS_WORKSPACE: workspace }, input: toServer, output: toClient });
+  const env = workspace === undefined ? {} : { RARS_WORKSPACE: workspace };
+  const server = await startStdioServer({ env, input: toServer, output: toClient });
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(new StreamTransport(toClient, toServer));
   return { client, close: async () => { await client.close(); await server.close(); } };
@@ -42,6 +43,13 @@ describe('stdio server', () => {
 
     const names = (await connection.client.listTools()).tools.map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining(['rars_run', 'rars_debug_start', 'rars_inspect']));
+  });
+
+  it('defaults the workspace to the directory it starts in', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    expect(connection.client.getInstructions()).toContain(await realpath(process.cwd()));
   });
 
   it.runIf(process.env.RARS_JAR)('runs a program', async () => {

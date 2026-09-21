@@ -1,14 +1,18 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 
 import { createMcpServer } from '../src/server.js';
+import { Workspace } from '../src/workspace.js';
 
 const sessionId = '00000000-0000-4000-8000-000000000000';
 
-async function connect() {
+async function connect(workspace?: Workspace) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createMcpServer({} as never);
+  const server = createMcpServer({ workspace: workspace ?? await Workspace.create(await mkdtemp(join(tmpdir(), 'rars-server-'))) } as never);
   const client = new Client({ name: 'test', version: '1.0.0' });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -27,6 +31,17 @@ describe('MCP server', () => {
     expect(names).toEqual(expect.arrayContaining([
       'rars_assemble', 'rars_run', 'rars_session_list', 'rars_session_close',
     ]));
+  });
+
+  it('lists the workspace folders in its instructions', async () => {
+    const workspace = await Workspace.create(
+      await mkdtemp(join(tmpdir(), 'rars-server-')), await mkdtemp(join(tmpdir(), 'rars-server-')),
+    );
+    const connection = await connect(workspace);
+    close = connection.close;
+
+    const instructions = connection.client.getInstructions() ?? '';
+    for (const root of workspace.roots) expect(instructions).toContain(root);
   });
 
   it('publishes every debug action in a flat top-level schema', async () => {
