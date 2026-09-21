@@ -90,6 +90,7 @@ export class HeadlessSession implements SessionBackend {
       registers: request.registers ?? [],
       memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
       includeSymbols: request.includeSymbols ?? false,
+      includeInstructions: request.includeInstructions ?? false,
     });
   }
 

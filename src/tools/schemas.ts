@@ -49,6 +49,7 @@ export const inspectSchema = z.object({
   registers: z.array(z.string()).optional(),
   memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional(),
   includeSymbols: z.boolean().optional(),
+  includeInstructions: z.boolean().optional(),
 });
 export const modifySchema = z.object({
   sessionId: z.string().uuid(),

@@ -114,6 +114,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(request.registers === undefined ? {} : { registers: request.registers }),
         ...(request.memory === undefined ? {} : { memory: request.memory }),
         ...(request.includeSymbols === undefined ? {} : { includeSymbols: request.includeSymbols }),
+        ...(request.includeInstructions === undefined ? {} : { includeInstructions: request.includeInstructions }),
       });
       return { content: [{ type: 'text', text: `Inspected RARS session ${sessionId}` }], structuredContent: result as Record<string, unknown> };
     },

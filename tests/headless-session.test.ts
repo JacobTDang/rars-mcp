@@ -79,6 +79,20 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('returns the assembled instructions only when they are requested', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    const state = await session.inspect({ includeInstructions: true }) as { instructions: unknown[] };
+    expect(state.instructions).toHaveLength(4);
+    expect(state.instructions[0]).toMatchObject({ address: '0x00400000', code: '0x00100513', source: 'li a0, 1', line: 5 });
+    expect(await session.inspect({})).not.toHaveProperty('instructions');
+    await session.close();
+  });
+
   it('reports the RARS assembly errors when a debug program fails to assemble', async () => {
     await expect(HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),

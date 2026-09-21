@@ -50,7 +50,7 @@ The RARS and bridge JAR paths default to `.cache/rars1_6.jar` and `java/bridge/b
 - `rars_session_list`: list stateful headless and live sessions.
 - `rars_session_close`: close or disconnect a session.
 
-- `rars_debug_start`, `rars_debug_command`, `rars_inspect`, `rars_modify`: control isolated stateful debuggers.
+- `rars_debug_start`, `rars_debug_command`, `rars_inspect`, `rars_modify`: control isolated stateful debuggers. `rars_inspect` can also return the symbol table (`includeSymbols`) and the assembled instructions with their addresses and source lines (`includeInstructions`).
 - `rars_live_connect`, `rars_live_command`: connect to and drive the visible desktop RARS session.
 
 ## Stateful and desktop debugging

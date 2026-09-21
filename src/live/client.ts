@@ -37,6 +37,7 @@ export class LiveClient implements SessionBackend {
       registers: request.registers ?? [],
       memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
       includeSymbols: request.includeSymbols ?? false,
+      includeInstructions: request.includeInstructions ?? false,
     });
   }
   async modify(request: ModifyRequest): Promise<MachineState> {
