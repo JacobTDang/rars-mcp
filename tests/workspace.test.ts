@@ -41,6 +41,26 @@ describe('Workspace', () => {
     });
   });
 
+  it('resolves relative paths against the first folder and absolute paths in any folder', async () => {
+    const second = await mkdtemp(join(tmpdir(), 'rars-workspace-second-'));
+    await writeFile(join(second, 'scratch.asm'), 'nop\n');
+    const workspace = await Workspace.create(fixtureRoot, second);
+
+    await expect(workspace.resolve('src/main.asm')).resolves.toBe(await realpath(join(fixtureRoot, 'src', 'main.asm')));
+    await expect(workspace.resolve(join(second, 'scratch.asm'))).resolves.toBe(await realpath(join(second, 'scratch.asm')));
+    await expect(workspace.resolve('scratch.asm')).rejects.toMatchObject({ code: 'PATH_NOT_FOUND' });
+    expect(workspace.roots).toEqual([await realpath(fixtureRoot), await realpath(second)]);
+  });
+
+  it('rejects an absolute path outside every folder', async () => {
+    const second = await mkdtemp(join(tmpdir(), 'rars-workspace-second-'));
+    const outside = await mkdtemp(join(tmpdir(), 'rars-outside-'));
+    await writeFile(join(outside, 'secret.asm'), 'secret');
+    const workspace = await Workspace.create(fixtureRoot, second);
+
+    await expect(workspace.resolve(join(outside, 'secret.asm'))).rejects.toMatchObject({ code: 'PATH_OUTSIDE_WORKSPACE' });
+  });
+
   it('resolves a new output beneath an existing workspace directory', async () => {
     const workspace = await Workspace.create(fixtureRoot);
 

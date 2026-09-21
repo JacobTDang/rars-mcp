@@ -15,7 +15,9 @@ export interface StdioServerOptions {
 // Runs the MCP server in this process over stdio, so a local client needs no HTTP server.
 export async function startStdioServer(options: StdioServerOptions = {}): Promise<{ close(): Promise<void> }> {
   const env = options.env ?? process.env;
-  const dependencies = await createToolDependencies(loadConfig(env), env);
+  // A stdio server belongs to one client, so its default workspace is the folder that client started it in.
+  const config = loadConfig({ ...env, RARS_WORKSPACE: env.RARS_WORKSPACE ?? process.cwd() });
+  const dependencies = await createToolDependencies(config, env);
   const handle = serveStdio(() => createMcpServer(dependencies), {
     transport: new StdioServerTransport(options.input ?? process.stdin, options.output ?? process.stdout),
     onerror: (error) => console.error(error),

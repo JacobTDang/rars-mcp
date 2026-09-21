@@ -39,7 +39,9 @@ The stdio entry point runs the server in the client's process, so no HTTP server
 claude mcp add rars -e RARS_WORKSPACE=/path/to/your/asm/files -- node /path/to/rars-mcp/dist/src/stdio.js
 ```
 
-The RARS and bridge JAR paths default to `.cache/rars1_6.jar` and `java/bridge/build/rars-mcp-bridge.jar` in this checkout. Set `RARS_JAR`, `RARS_BRIDGE_JAR`, or `RARS_WORKSPACE` to override them.
+The RARS and bridge JAR paths default to `.cache/rars1_6.jar` and `java/bridge/build/rars-mcp-bridge.jar` in this checkout. Set `RARS_JAR` or `RARS_BRIDGE_JAR` to override them.
+
+`RARS_WORKSPACE` can list several folders separated by `:` (`;` on Windows). Relative file paths resolve against the first folder, and absolute paths may point into any listed folder. Without `RARS_WORKSPACE`, the stdio entry point uses the folder the client starts it in.
 
 ## Tools
 

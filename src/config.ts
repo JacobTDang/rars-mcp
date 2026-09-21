@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { RarsError } from './errors.js';
 
 export interface AppConfig {
-  workspaceRoot: string;
+  workspaceRoots: string[];
   rarsJar: string;
   executionTimeoutMs: number;
   maxOutputBytes: number;
@@ -53,11 +53,19 @@ function packageRoot(): string {
 // Defaults point at this checkout; the Docker image sets every path explicitly.
 export function loadConfig(env: Environment = process.env): AppConfig {
   const root = packageRoot();
-  const workspaceRoot = resolve(env.RARS_WORKSPACE ?? 'workspace');
+  const workspaceRoots = (env.RARS_WORKSPACE ?? 'workspace')
+    .split(delimiter)
+    .filter((entry) => entry !== '')
+    .map((entry) => resolve(entry));
+  if (workspaceRoots.length === 0) {
+    throw new RarsError('INVALID_CONFIGURATION', 'RARS_WORKSPACE must name at least one folder', {
+      value: env.RARS_WORKSPACE,
+    });
+  }
   const bridgeToken = env.RARS_BRIDGE_TOKEN;
 
   return {
-    workspaceRoot,
+    workspaceRoots,
     rarsJar: resolve(env.RARS_JAR ?? join(root, '.cache', 'rars1_6.jar')),
     executionTimeoutMs: positiveInteger(env, 'RARS_EXECUTION_TIMEOUT_MS', 10_000),
     maxOutputBytes: positiveInteger(env, 'RARS_MAX_OUTPUT_BYTES', 1_048_576),
