@@ -6,4 +6,4 @@
 - **Authentication failure:** Stop old launchers, remove `.runtime`, and start the desktop launcher again. The gateway reads the current token when connecting.
 - **Unsaved changes:** Save the GUI buffer, or pass `conflictPolicy: "discard"` only when losing those edits is intended.
 - **Program never stops:** Headless runs use wall-clock and instruction limits. In a debug session, `continue` stops after `maxSteps` instructions (1,000,000 by default) and returns `stopReason: "step_limit"`; reset the session or continue again.
-- **Stale session ID:** Call `rars_session_list`, reconnect if needed, and use the current ID.
+- **Stale session ID:** Call `rars_session_list`, reconnect if needed, and use the current ID. A debug session closes after 30 minutes without requests (`RARS_SESSION_IDLE_MS`) and then reports `SESSION_EXPIRED`.

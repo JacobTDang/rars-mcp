@@ -9,7 +9,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export async function createToolDependencies(config: AppConfig, env: Environment = process.env): Promise<ToolDependencies> {
   return {
     workspace: await Workspace.create(...config.workspaceRoots),
-    sessions: new SessionStore(),
+    sessions: new SessionStore({ idleMs: config.sessionIdleMs }),
     run: runRars,
     javaExecutable: env.JAVA_EXECUTABLE ?? 'java',
     rarsJar: config.rarsJar,

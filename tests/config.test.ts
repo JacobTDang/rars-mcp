@@ -17,7 +17,9 @@ describe('loadConfig', () => {
       executionTimeoutMs: 10_000,
       maxOutputBytes: 1_048_576,
       maxInspectionBytes: 65_536,
+      sessionIdleMs: 1_800_000,
     });
+    expect(loadConfig({ RARS_WORKSPACE: workspaceRoot, RARS_SESSION_IDLE_MS: '60000' }).sessionIdleMs).toBe(60_000);
   });
 
   it('defaults to the JAR files and runtime folder in this repository', () => {

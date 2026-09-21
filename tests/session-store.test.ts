@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionStore } from '../src/sessions/store.js';
 import type {
@@ -21,6 +21,39 @@ function backend(name: string): SessionBackend {
 }
 
 describe('SessionStore', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('closes a session after the idle limit and reports it as expired', async () => {
+    vi.useFakeTimers();
+    const target = backend('idle');
+    const store = new SessionStore({ idleMs: 1000 });
+    const id = store.add(target);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(target.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(target.close).toHaveBeenCalledTimes(1);
+    expect(await store.list()).toEqual([]);
+    expect(() => store.get(id)).toThrowError(expect.objectContaining({
+      code: 'SESSION_EXPIRED', message: `Session ${id} was closed after 1000 ms without requests`,
+    }));
+  });
+
+  it('keeps a session open while it receives requests', async () => {
+    vi.useFakeTimers();
+    const target = backend('busy');
+    const store = new SessionStore({ idleMs: 1000 });
+    const id = store.add(target);
+
+    await vi.advanceTimersByTimeAsync(800);
+    store.get(id);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(target.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(target.close).toHaveBeenCalledTimes(1);
+  });
+
   it('assigns unique opaque IDs and lists isolated summaries', async () => {
     const store = new SessionStore();
     const first = store.add(backend('first'));
