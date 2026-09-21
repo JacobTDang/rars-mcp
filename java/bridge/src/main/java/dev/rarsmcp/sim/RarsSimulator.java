@@ -1,5 +1,7 @@
 package dev.rarsmcp.sim;
 
+import dev.rarsmcp.protocol.Words;
+
 import rars.AssemblyException;
 import rars.RISCVprogram;
 import rars.Globals;
@@ -145,7 +147,7 @@ public final class RarsSimulator {
         List<Map<String, Object>> result = new ArrayList<>();
         for (RISCVprogram source : sources) addSymbols(result, source.getLocalSymbolTable(), false);
         addSymbols(result, Globals.symbolTable, true);
-        result.sort(Comparator.comparingLong(symbol -> (Long) symbol.get("address")));
+        result.sort(Comparator.comparing(symbol -> (String) symbol.get("address")));
         return result;
     }
 
@@ -157,7 +159,7 @@ public final class RarsSimulator {
     private static Map<String, Object> symbol(Symbol symbol, String type, boolean global) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", symbol.getName());
-        result.put("address", Integer.toUnsignedLong(symbol.getAddress()));
+        result.put("address", Words.address(symbol.getAddress()));
         result.put("type", type);
         result.put("global", global);
         return result;
@@ -189,11 +191,13 @@ public final class RarsSimulator {
         ensureLoaded();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", status);
-        result.put("programCounter", Integer.toUnsignedLong(RegisterFile.getProgramCounter()));
+        result.put("programCounter", Words.address(RegisterFile.getProgramCounter()));
         result.put("stdout", program.getSTDOUT());
         result.put("stderr", program.getSTDERR());
         result.put("exitCode", program.getExitCode());
-        result.put("breakpoints", new ArrayList<>(breakpoints));
+        List<String> breakpointAddresses = new ArrayList<>();
+        for (int breakpoint : breakpoints) breakpointAddresses.add(Words.address(breakpoint));
+        result.put("breakpoints", breakpointAddresses);
         return result;
     }
 

@@ -17,13 +17,21 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
       timeoutMs: 3_000,
     });
 
-    const initial = await session.inspect({ registers: ['a0'] }) as { programCounter: number };
+    const initial = await session.inspect({ registers: ['a0'] }) as { programCounter: string };
+    expect(initial.programCounter).toBe('0x00400000');
     await session.command({ action: 'step' });
-    const stepped = await session.inspect({ registers: ['a0'] }) as { programCounter: number };
-    expect(stepped.programCounter).toBe(initial.programCounter + 4);
-    await session.modify({ registers: { a0: '41' }, memory: [{ address: '0x10010000', width: 4, value: '1234' }] });
-    expect(await session.inspect({ registers: ['a0'], memory: [{ address: '0x10010000', length: 4 }] })).toMatchObject({
-      registers: { a0: 41 }, memory: [{ value: 1234 }],
+    const stepped = await session.inspect({ registers: ['a0'] }) as { programCounter: string };
+    expect(stepped.programCounter).toBe('0x00400004');
+    expect(await session.command({ action: 'breakpoint_add', address: '4194312' })).toMatchObject({ breakpoints: ['0x00400008'] });
+    await session.modify({ registers: { a0: '-4096' }, memory: [{ address: '0x10010000', width: 4, value: '1234' }] });
+    expect(await session.inspect({
+      registers: ['a0'], memory: [{ address: '0x10010000', length: 4 }, { address: '0x10010000', length: 1 }],
+    })).toMatchObject({
+      registers: { a0: { hex: '0xfffff000', signed: -4096 } },
+      memory: [
+        { address: '0x10010000', width: 4, hex: '0x000004d2', signed: 1234 },
+        { address: '0x10010000', width: 1, hex: '0xd2', signed: -46 },
+      ],
     });
     await session.command({ action: 'backstep' });
     expect((await session.summary()).state).toBe('paused');
@@ -38,8 +46,8 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
       files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
     });
 
-    const state = await session.inspect({ registers: ['pc'] }) as { programCounter: number; registers: { pc: number } };
-    expect(state.registers.pc).toBe(state.programCounter);
+    const state = await session.inspect({ registers: ['pc'] }) as { programCounter: string; registers: { pc: { hex: string } } };
+    expect(state.registers.pc.hex).toBe(state.programCounter);
     await expect(session.inspect({ registers: ['nope'] })).rejects.toThrow('Unknown register: nope');
     await session.close();
   });
@@ -51,10 +59,10 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
       files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
     });
 
-    const withSymbols = await session.inspect({ includeSymbols: true }) as { programCounter: number; symbols: unknown[] };
+    const withSymbols = await session.inspect({ includeSymbols: true }) as { programCounter: string; symbols: unknown[] };
     expect(withSymbols.symbols).toEqual([
       { name: 'main', address: withSymbols.programCounter, type: 'text', global: false },
-      { name: 'value', address: 0x10010000, type: 'data', global: false },
+      { name: 'value', address: '0x10010000', type: 'data', global: false },
     ]);
     expect(await session.inspect({})).not.toHaveProperty('symbols');
     await session.close();

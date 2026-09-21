@@ -2,6 +2,7 @@ package dev.rarsmcp.server;
 
 import dev.rarsmcp.protocol.BridgeRequest;
 import dev.rarsmcp.protocol.BridgeResponse;
+import dev.rarsmcp.protocol.Words;
 import dev.rarsmcp.sim.RarsSimulator;
 
 import java.io.BufferedReader;
@@ -97,7 +98,9 @@ public final class BridgeServer {
             case "inspect": {
                 Map<String, Object> result = new LinkedHashMap<>(simulator.snapshot());
                 Map<String, Object> registers = new LinkedHashMap<>();
-                for (String name : strings(payload.get("registers"))) registers.put(name, simulator.readRegister(name));
+                for (String name : strings(payload.get("registers"))) {
+                    registers.put(name, Words.word(((Number) simulator.readRegister(name)).longValue(), 4));
+                }
                 result.put("registers", registers);
                 List<Object> memory = new ArrayList<>();
                 Object ranges = payload.get("memory");
@@ -105,7 +108,9 @@ public final class BridgeServer {
                     Map<String, Object> range = (Map<String, Object>) item;
                     int address = integer(range.get("address"));
                     int width = integer(range.get("width"));
-                    memory.add(mapOf("address", address, "width", width, "value", simulator.readMemory(address, width)));
+                    Map<String, Object> entry = mapOf("address", Words.address(address), "width", width);
+                    entry.putAll(Words.word(((Number) simulator.readMemory(address, width)).longValue(), width));
+                    memory.add(entry);
                 }
                 result.put("memory", memory);
                 if (Boolean.TRUE.equals(payload.get("includeSymbols"))) result.put("symbols", simulator.symbols());

@@ -25,7 +25,7 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
     expect(sessionId).toBeTruthy();
     await handlers.modify({ sessionId, registers: { a0: '41' } });
-    expect((await handlers.inspect({ sessionId, registers: ['a0'] })).structuredContent).toMatchObject({ registers: { a0: 41 } });
+    expect((await handlers.inspect({ sessionId, registers: ['a0'] })).structuredContent).toMatchObject({ registers: { a0: { hex: '0x00000029', signed: 41 } } });
     await handlers.debugCommand({ sessionId, action: 'step' });
     await handlers.debugCommand({ sessionId, action: 'backstep' });
     await handlers.sessionClose({ sessionId });
