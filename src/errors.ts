@@ -2,7 +2,8 @@ export type RarsErrorCode =
   | 'INVALID_CONFIGURATION'
   | 'PATH_NOT_FOUND'
   | 'PATH_OUTSIDE_WORKSPACE'
-  | 'SESSION_NOT_FOUND';
+  | 'SESSION_NOT_FOUND'
+  | 'SESSION_EXPIRED';
 
 export class RarsError extends Error {
   readonly code: RarsErrorCode;
