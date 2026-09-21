@@ -1,9 +1,12 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { loadConfig } from '../src/config.js';
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('loadConfig', () => {
   it('loads bounded defaults', () => {
@@ -14,8 +17,17 @@ describe('loadConfig', () => {
       executionTimeoutMs: 10_000,
       maxOutputBytes: 1_048_576,
       maxInspectionBytes: 65_536,
-      bridgeHost: 'host.docker.internal',
-      bridgeJar: '/opt/rars/rars-mcp-bridge.jar',
+    });
+  });
+
+  it('defaults to the JAR files and runtime folder in this repository', () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'rars-config-'));
+
+    expect(loadConfig({ RARS_WORKSPACE: workspaceRoot })).toMatchObject({
+      rarsJar: join(repositoryRoot, '.cache', 'rars1_6.jar'),
+      bridgeJar: join(repositoryRoot, 'java', 'bridge', 'build', 'rars-mcp-bridge.jar'),
+      liveDiscoveryDir: join(repositoryRoot, '.runtime'),
+      bridgeHost: '127.0.0.1',
     });
   });
 

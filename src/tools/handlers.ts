@@ -117,8 +117,9 @@ export function createToolHandlers(deps: ToolDependencies) {
     },
     liveConnect: async (_input: Record<string, never> = {}): Promise<ToolResult> => {
       if (!deps.liveDiscoveryDir) throw new Error('Live RARS discovery is not configured');
+      if (!deps.bridgeHost) throw new Error('Live RARS bridge host is not configured');
       const discovered = await discoverLiveSession(deps.liveDiscoveryDir);
-      const backend = await LiveClient.connect({ host: deps.bridgeHost ?? 'host.docker.internal', ...discovered, timeoutMs: deps.timeoutMs });
+      const backend = await LiveClient.connect({ host: deps.bridgeHost, ...discovered, timeoutMs: deps.timeoutMs });
       const sessionId = deps.sessions.add(backend);
       return { content: [{ type: 'text', text: `Connected live RARS session ${sessionId}` }], structuredContent: { sessionId, kind: 'live', state: 'ready' } };
     },

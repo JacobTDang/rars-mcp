@@ -39,4 +39,15 @@ describe('live tools', () => {
     expect(server.listening).toBe(true);
     server.close();
   });
+
+  it('refuses to connect when no bridge host is configured', async () => {
+    const discovery = await mkdtemp(join(tmpdir(), 'rars-live-'));
+    const root = await mkdtemp(join(tmpdir(), 'rars-live-workspace-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => { throw new Error('unused'); },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+      liveDiscoveryDir: discovery,
+    });
+    await expect(handlers.liveConnect({})).rejects.toThrow('Live RARS bridge host is not configured');
+  });
 });
