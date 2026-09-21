@@ -25,6 +25,31 @@ describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
   });
 });
 
+describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
+  it('returns requested registers and memory as structured values', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['hello.asm'], instructionCount: true, registers: ['a7'], memoryRanges: ['0x10010000-0x10010004'],
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      instructionCount: 5,
+      registers: { a7: { hex: '0x0000000a', signed: 10 } },
+      memory: [
+        { address: '0x10010000', hex: '0x6c6c6568', signed: 1819043176 },
+        { address: '0x10010004', hex: '0x7266206f', signed: 1919295599 },
+      ],
+    });
+    expect((result.structuredContent as { stderr: string }).stderr).not.toContain('a7\t');
+  });
+});
+
 describe('headless tool handlers', () => {
   it('resolves files and returns structured assembly diagnostics', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
