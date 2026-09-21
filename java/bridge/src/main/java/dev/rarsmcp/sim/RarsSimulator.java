@@ -18,6 +18,7 @@ import rars.riscv.hardware.RegisterFile;
 import rars.simulator.BackStepper;
 import rars.simulator.Simulator;
 
+import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -28,8 +29,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class RarsSimulator {
+    private static final Pattern NUMBER = Pattern.compile("-?(0x[0-9a-fA-F]+|\\d+)");
+    private static final Pattern FILE_LINE = Pattern.compile("(.+):(\\d+)");
+
     private Program program;
     private Options options;
     private List<String> files = new ArrayList<>();
@@ -146,8 +152,57 @@ public final class RarsSimulator {
     }
 
     public synchronized Map<String, Object> reset() throws Exception { setup(); return snapshot(); }
-    public synchronized void addBreakpoint(int address) { breakpoints.add(address); }
-    public synchronized void removeBreakpoint(int address) { breakpoints.remove(address); }
+    public synchronized Map<String, Object> addBreakpoint(String location) throws Exception {
+        ensureLoaded();
+        breakpoints.add(resolveLocation(location));
+        return snapshot();
+    }
+
+    public synchronized Map<String, Object> removeBreakpoint(String location) throws Exception {
+        ensureLoaded();
+        breakpoints.remove(resolveLocation(location));
+        return snapshot();
+    }
+
+    // A breakpoint location: an address, file:line, or a code label.
+    private int resolveLocation(String location) throws Exception {
+        if (NUMBER.matcher(location).matches()) return (int) (long) Long.decode(location);
+        Matcher fileLine = FILE_LINE.matcher(location);
+        if (fileLine.matches()) return addressOfLine(fileLine.group(1), Integer.parseInt(fileLine.group(2)), location);
+        return addressOfLabel(location);
+    }
+
+    // The first instruction assembled from that line; a file matches by its full path or a trailing part of it.
+    private int addressOfLine(String file, int line, String location) throws Exception {
+        for (ProgramStatement statement : code().getMachineList()) {
+            String source = statement.getSourceFile();
+            if (statement.getSourceLine() == line && (source.equals(file) || source.endsWith(File.separator + file))) {
+                return statement.getAddress();
+            }
+        }
+        throw new IllegalArgumentException("No instruction at " + location);
+    }
+
+    private int addressOfLabel(String label) {
+        Set<Integer> addresses = new TreeSet<>();
+        boolean dataLabel = false;
+        for (SymbolTable table : symbolTables()) {
+            for (Symbol symbol : table.getTextSymbols()) if (symbol.getName().equals(label)) addresses.add(symbol.getAddress());
+            for (Symbol symbol : table.getDataSymbols()) if (symbol.getName().equals(label)) dataLabel = true;
+        }
+        if (addresses.size() == 1) return addresses.iterator().next();
+        if (addresses.size() > 1) throw new IllegalArgumentException("Label " + label + " is defined in more than one file; use file:line instead");
+        if (dataLabel) throw new IllegalArgumentException(label + " is a data label, not a code label");
+        throw new IllegalArgumentException("Unknown label: " + label);
+    }
+
+    // Each source file's local labels, then the .globl labels.
+    private List<SymbolTable> symbolTables() {
+        List<SymbolTable> tables = new ArrayList<>();
+        for (RISCVprogram source : sources) tables.add(source.getLocalSymbolTable());
+        tables.add(Globals.symbolTable);
+        return tables;
+    }
     public synchronized Object readRegister(String name) {
         ensureLoaded();
         if (name.equals("pc")) return Integer.toUnsignedLong(RegisterFile.getProgramCounter());

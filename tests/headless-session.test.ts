@@ -50,6 +50,20 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('sets breakpoints by label and by file:line', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    expect(await session.command({ action: 'breakpoint_add', address: 'debug.asm:7' })).toMatchObject({ breakpoints: ['0x00400008'] });
+    expect(await session.command({ action: 'continue' })).toMatchObject({ programCounter: '0x00400008', stopReason: 'breakpoint' });
+    expect(await session.command({ action: 'breakpoint_add', address: 'main' })).toMatchObject({ breakpoints: ['0x00400000', '0x00400008'] });
+    await expect(session.command({ action: 'breakpoint_add', address: 'nope' })).rejects.toThrow('Unknown label: nope');
+    await session.close();
+  });
+
   it('reads pc and names an unknown register in the error', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),

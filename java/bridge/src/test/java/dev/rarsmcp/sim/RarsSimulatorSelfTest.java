@@ -29,10 +29,15 @@ public final class RarsSimulatorSelfTest {
 
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         require("step".equals(simulator.step().get("stopReason")), "step reason");
-        simulator.addBreakpoint((int) initialPc + 8);
+        simulator.addBreakpoint("debug.asm:7");
         Map<String, Object> atBreakpoint = simulator.runUntilStop(1000);
         require("breakpoint".equals(atBreakpoint.get("stopReason")) && pc(atBreakpoint) == initialPc + 8, "breakpoint reason");
-        simulator.removeBreakpoint((int) initialPc + 8);
+        simulator.removeBreakpoint(String.valueOf(initialPc + 8));
+        require(((java.util.List<?>) simulator.addBreakpoint("main").get("breakpoints")).contains("0x00400000"), "label breakpoint");
+        simulator.removeBreakpoint("0x00400000");
+        requireThrows(() -> simulator.addBreakpoint("nope"), "Unknown label: nope", "unknown label");
+        requireThrows(() -> simulator.addBreakpoint("value"), "value is a data label, not a code label", "data label");
+        requireThrows(() -> simulator.addBreakpoint("debug.asm:2"), "No instruction at debug.asm:2", "line without code");
         Map<String, Object> exited = simulator.runUntilStop(1000);
         require("exited".equals(exited.get("stopReason")) && "terminated".equals(exited.get("status")), "exit reason");
 
