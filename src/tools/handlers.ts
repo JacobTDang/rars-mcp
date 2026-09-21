@@ -1,7 +1,7 @@
 import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
-import { extractInstructionCount } from '../rars/output.js';
+import { extractDumps, extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand } from '../sessions/types.js';
 import type { Workspace } from '../workspace.js';
@@ -47,10 +47,13 @@ export function createToolHandlers(deps: ToolDependencies) {
       timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
       maxOutputBytes: deps.maxOutputBytes,
     });
-    // A killed or cut-off run never reaches the point where RARS prints the count.
-    const counted = runInput.instructionCount && !result.timedOut && !result.truncated
-      ? extractInstructionCount(result.stderr) : { stderr: result.stderr };
-    const diagnostics = parseDiagnostics(counted.stderr);
+    // A killed or cut-off run never reaches the point where RARS prints the count and dumps.
+    const finished = !result.timedOut && !result.truncated;
+    const dumpsRequested = runInput.registers !== undefined || runInput.memoryRanges !== undefined;
+    const dumped = finished && dumpsRequested ? extractDumps(result.stderr) : { stderr: result.stderr };
+    const counted = finished && runInput.instructionCount ? extractInstructionCount(dumped.stderr) : {};
+    const output = { ...dumped, ...counted };
+    const diagnostics = parseDiagnostics(output.stderr);
     const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
       diagnostics.some((item) => item.severity === 'error');
     const action = mode === 'assemble' ? 'Assembly' : 'Execution';
@@ -59,7 +62,7 @@ export function createToolHandlers(deps: ToolDependencies) {
       isError ? `${action} failed` : `${action} completed`;
     return {
       content: [{ type: 'text', text: summary }],
-      structuredContent: { ...result, ...counted, diagnostics },
+      structuredContent: { ...result, ...output, diagnostics },
       ...(isError ? { isError: true } : {}),
     };
   };
