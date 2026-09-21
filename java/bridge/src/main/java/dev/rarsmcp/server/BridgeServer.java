@@ -146,7 +146,7 @@ public final class BridgeServer {
             case "pause": return simulator.snapshot();
             case "breakpoint_add": return simulator.addBreakpoint(string(payload.get("address")));
             case "breakpoint_remove": return simulator.removeBreakpoint(string(payload.get("address")));
-            case "terminate": return simulator.snapshot();
+            case "terminate": return simulator.terminate();
             default: throw new IllegalArgumentException("Unknown debug action: " + action);
         }
     }

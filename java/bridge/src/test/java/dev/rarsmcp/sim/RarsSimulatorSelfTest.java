@@ -12,8 +12,8 @@ public final class RarsSimulatorSelfTest {
         Map<String, Object> initial = simulator.snapshot();
         long initialPc = pc(initial);
         require(((Number) simulator.readRegister("pc")).longValue() == initialPc, "pc read");
-        requireThrows(() -> simulator.readRegister("nope"), "Unknown register: nope", "unknown register read");
-        requireThrows(() -> simulator.setRegister("nope", 1), "Unknown register: nope", "unknown register write");
+        requireThrows(IllegalArgumentException.class, () -> simulator.readRegister("nope"), "Unknown register: nope", "unknown register read");
+        requireThrows(IllegalArgumentException.class, () -> simulator.setRegister("nope", 1), "Unknown register: nope", "unknown register write");
         simulator.step();
         require(pc(simulator.snapshot()) == initialPc + 4, "step");
         simulator.setRegister("a0", 41);
@@ -35,11 +35,25 @@ public final class RarsSimulatorSelfTest {
         simulator.removeBreakpoint(String.valueOf(initialPc + 8));
         require(((java.util.List<?>) simulator.addBreakpoint("main").get("breakpoints")).contains("0x00400000"), "label breakpoint");
         simulator.removeBreakpoint("0x00400000");
-        requireThrows(() -> simulator.addBreakpoint("nope"), "Unknown label: nope", "unknown label");
-        requireThrows(() -> simulator.addBreakpoint("value"), "value is a data label, not a code label", "data label");
-        requireThrows(() -> simulator.addBreakpoint("debug.asm:2"), "No instruction at debug.asm:2", "line without code");
+        requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("nope"), "Unknown label: nope", "unknown label");
+        requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("value"), "value is a data label, not a code label", "data label");
+        requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("debug.asm:2"), "No instruction at debug.asm:2", "line without code");
         Map<String, Object> exited = simulator.runUntilStop(1000);
         require("exited".equals(exited.get("stopReason")) && "terminated".equals(exited.get("status")), "exit reason");
+
+        String terminatedMessage = "The program has terminated; reset the session to run it again";
+        requireThrows(IllegalStateException.class, () -> simulator.step(), terminatedMessage, "step after exit");
+
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        simulator.step();
+        Map<String, Object> terminated = simulator.terminate();
+        require("terminated".equals(terminated.get("status")) && "terminated".equals(terminated.get("stopReason")), "terminate");
+        requireThrows(IllegalStateException.class, () -> simulator.step(), terminatedMessage, "step after terminate");
+        requireThrows(IllegalStateException.class, () -> simulator.runUntilStop(10), terminatedMessage, "continue after terminate");
+        require("paused".equals(simulator.backstep().get("status")) && pc(simulator.snapshot()) == initialPc, "backstep after terminate");
+        simulator.terminate();
+        require("paused".equals(simulator.reset().get("status")), "reset after terminate");
+        require("step".equals(simulator.step().get("stopReason")), "step after reset");
 
         simulator.load(Arrays.asList("tests/fixtures/infinite.asm"), Collections.emptyList(), "");
         Map<String, Object> limited = simulator.runUntilStop(100);
@@ -91,13 +105,11 @@ public final class RarsSimulatorSelfTest {
         if (!value) throw new AssertionError(name);
     }
 
-    private static void requireThrows(Action action, String message, String name) {
+    private static void requireThrows(Class<? extends Exception> type, Action action, String message, String name) {
         try {
             action.run();
-        } catch (IllegalArgumentException error) {
-            if (message.equals(error.getMessage())) return;
-            throw new AssertionError(name + ": unexpected message " + error.getMessage());
         } catch (Exception error) {
+            if (type.isInstance(error) && message.equals(error.getMessage())) return;
             throw new AssertionError(name + ": unexpected " + error);
         }
         throw new AssertionError(name + ": nothing was thrown");

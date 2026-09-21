@@ -95,7 +95,7 @@ public final class RarsSimulator {
     }
 
     public synchronized Map<String, Object> step() throws Exception {
-        ensureLoaded();
+        ensureRunnable();
         if (simulateOne()) {
             status = "paused";
             stopReason = "step";
@@ -104,7 +104,7 @@ public final class RarsSimulator {
     }
 
     public synchronized Map<String, Object> runUntilStop(int maximumSteps) throws Exception {
-        ensureLoaded();
+        ensureRunnable();
         for (int count = 0; count < maximumSteps; count++) {
             if (!simulateOne()) return snapshot();
             if (breakpoints.contains(RegisterFile.getProgramCounter())) {
@@ -152,6 +152,21 @@ public final class RarsSimulator {
     }
 
     public synchronized Map<String, Object> reset() throws Exception { setup(); return snapshot(); }
+
+    public synchronized Map<String, Object> terminate() {
+        ensureLoaded();
+        status = "terminated";
+        stopReason = "terminated";
+        return snapshot();
+    }
+
+    // A terminated program would otherwise run whatever memory follows its last instruction.
+    private void ensureRunnable() {
+        ensureLoaded();
+        if (status.equals("terminated")) {
+            throw new IllegalStateException("The program has terminated; reset the session to run it again");
+        }
+    }
     public synchronized Map<String, Object> addBreakpoint(String location) throws Exception {
         ensureLoaded();
         breakpoints.add(resolveLocation(location));

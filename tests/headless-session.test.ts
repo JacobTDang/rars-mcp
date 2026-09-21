@@ -64,6 +64,21 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('terminates a program and refuses to run it until it is reset', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    await session.command({ action: 'step' });
+    expect(await session.command({ action: 'terminate' })).toMatchObject({ status: 'terminated', stopReason: 'terminated' });
+    await expect(session.command({ action: 'step' })).rejects.toThrow('The program has terminated; reset the session to run it again');
+    expect(await session.command({ action: 'reset' })).toMatchObject({ status: 'paused', programCounter: '0x00400000' });
+    expect(await session.command({ action: 'step' })).toMatchObject({ status: 'paused', stopReason: 'step' });
+    await session.close();
+  });
+
   it('reads pc and names an unknown register in the error', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
