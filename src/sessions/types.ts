@@ -9,10 +9,15 @@ export interface SessionSummary {
   name?: string;
 }
 
+export interface Word {
+  hex: string;
+  signed: number;
+}
+
 export interface MachineState {
   status: SessionState;
   programCounter?: string;
-  registers?: Readonly<Record<string, string>>;
+  registers?: Readonly<Record<string, Word>>;
   output?: string;
 }
 
