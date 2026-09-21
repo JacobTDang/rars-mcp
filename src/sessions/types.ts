@@ -14,15 +14,20 @@ export interface Word {
   signed: number;
 }
 
+export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'exited' | 'ran_off_end' | 'exception' | 'backstep';
+
 export interface MachineState {
   status: SessionState;
+  stopReason?: StopReason;
+  exception?: string;
   programCounter?: string;
   registers?: Readonly<Record<string, Word>>;
   output?: string;
 }
 
 export type DebugCommand =
-  | { action: 'step' | 'backstep' | 'continue' | 'pause' | 'reset' | 'terminate' }
+  | { action: 'step' | 'backstep' | 'pause' | 'reset' | 'terminate' }
+  | { action: 'continue'; maxSteps?: number }
   | { action: 'breakpoint_add' | 'breakpoint_remove'; address: string };
 
 export interface InspectRequest {

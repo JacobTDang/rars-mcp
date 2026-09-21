@@ -73,6 +73,17 @@ describe('MCP server', () => {
     expect(JSON.stringify(result.content)).toContain('address is only valid for breakpoint_add and breakpoint_remove');
   });
 
+  it('accepts maxSteps only for continue', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const result = await connection.client.callTool({
+      name: 'rars_debug_command', arguments: { sessionId, action: 'step', maxSteps: 10 },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('maxSteps is only valid for continue');
+  });
+
   it('requires an address for breakpoint actions', async () => {
     const connection = await connect();
     close = connection.close;

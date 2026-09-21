@@ -4,6 +4,7 @@ import dev.rarsmcp.protocol.Words;
 
 import rars.AssemblyException;
 import rars.RISCVprogram;
+import rars.SimulationException;
 import rars.Globals;
 import rars.api.Options;
 import rars.api.Program;
@@ -35,6 +36,9 @@ public final class RarsSimulator {
     private List<String> arguments = new ArrayList<>();
     private String stdin = "";
     private String status = "ready";
+    // Why the last step, continue or backstep stopped; null until one runs.
+    private String stopReason;
+    private String exception;
     private final Set<Integer> breakpoints = new TreeSet<>();
 
     public synchronized void load(List<String> sourceFiles, List<String> programArguments, String standardInput) throws Exception {
@@ -79,31 +83,53 @@ public final class RarsSimulator {
         code.getBackStepper().setEnabled(true);
         Globals.program = code;
         status = "paused";
+        stopReason = null;
+        exception = null;
     }
 
     public synchronized Map<String, Object> step() throws Exception {
         ensureLoaded();
-        Simulator.Reason reason = program.simulate();
-        status = reason == Simulator.Reason.MAX_STEPS || reason == Simulator.Reason.BREAKPOINT ? "paused" : "terminated";
+        if (simulateOne()) {
+            status = "paused";
+            stopReason = "step";
+        }
         return snapshot();
     }
 
     public synchronized Map<String, Object> runUntilStop(int maximumSteps) throws Exception {
         ensureLoaded();
-        status = "running";
         for (int count = 0; count < maximumSteps; count++) {
-            Simulator.Reason reason = program.simulate();
-            if (reason != Simulator.Reason.MAX_STEPS) {
-                status = reason == Simulator.Reason.BREAKPOINT ? "paused" : "terminated";
-                return snapshot();
-            }
+            if (!simulateOne()) return snapshot();
             if (breakpoints.contains(RegisterFile.getProgramCounter())) {
                 status = "paused";
+                stopReason = "breakpoint";
                 return snapshot();
             }
         }
         status = "paused";
+        stopReason = "step_limit";
         return snapshot();
+    }
+
+    // Runs one instruction. Returns false, with status and stopReason set, when the program stopped by itself.
+    private boolean simulateOne() {
+        Simulator.Reason reason;
+        try {
+            reason = program.simulate();
+        } catch (SimulationException error) {
+            status = "terminated";
+            stopReason = "exception";
+            exception = error.error() != null ? error.error().getMessage() : error.getMessage();
+            return false;
+        }
+        switch (reason) {
+            case MAX_STEPS: return true;
+            case BREAKPOINT: status = "paused"; stopReason = "breakpoint"; return false;
+            case NORMAL_TERMINATION: status = "terminated"; stopReason = "exited"; return false;
+            case CLIFF_TERMINATION: status = "terminated"; stopReason = "ran_off_end"; return false;
+            case EXCEPTION: status = "terminated"; stopReason = "exception"; return false;
+            default: throw new IllegalStateException("Unexpected RARS stop reason: " + reason);
+        }
     }
 
     public synchronized Map<String, Object> backstep() throws Exception {
@@ -113,6 +139,8 @@ public final class RarsSimulator {
         Memory previous = Memory.swapInstance(program.getMemory());
         try { backStepper.backStep(); } finally { Memory.swapInstance(previous); }
         status = "paused";
+        stopReason = "backstep";
+        exception = null;
         return snapshot();
     }
 
@@ -195,6 +223,8 @@ public final class RarsSimulator {
         result.put("stdout", program.getSTDOUT());
         result.put("stderr", program.getSTDERR());
         result.put("exitCode", program.getExitCode());
+        if (stopReason != null) result.put("stopReason", stopReason);
+        if (exception != null) result.put("exception", exception);
         List<String> breakpointAddresses = new ArrayList<>();
         for (int breakpoint : breakpoints) breakpointAddresses.add(Words.address(breakpoint));
         result.put("breakpoints", breakpointAddresses);
