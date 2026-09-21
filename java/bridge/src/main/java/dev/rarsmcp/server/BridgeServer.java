@@ -114,6 +114,7 @@ public final class BridgeServer {
                 }
                 result.put("memory", memory);
                 if (Boolean.TRUE.equals(payload.get("includeSymbols"))) result.put("symbols", simulator.symbols());
+                if (Boolean.TRUE.equals(payload.get("includeInstructions"))) result.put("instructions", simulator.instructions());
                 return BridgeResponse.success(request.id, result);
             }
             case "modify":

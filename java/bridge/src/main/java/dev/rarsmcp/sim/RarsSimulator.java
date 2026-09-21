@@ -3,6 +3,7 @@ package dev.rarsmcp.sim;
 import dev.rarsmcp.protocol.Words;
 
 import rars.AssemblyException;
+import rars.ProgramStatement;
 import rars.RISCVprogram;
 import rars.SimulationException;
 import rars.Globals;
@@ -176,6 +177,23 @@ public final class RarsSimulator {
         for (RISCVprogram source : sources) addSymbols(result, source.getLocalSymbolTable(), false);
         addSymbols(result, Globals.symbolTable, true);
         result.sort(Comparator.comparing(symbol -> (String) symbol.get("address")));
+        return result;
+    }
+
+    // The assembled text segment, one entry per machine instruction.
+    public synchronized List<Map<String, Object>> instructions() throws Exception {
+        ensureLoaded();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ProgramStatement statement : code().getMachineList()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("address", Words.address(statement.getAddress()));
+            entry.put("code", Words.address(statement.getBinaryStatement()));
+            entry.put("basic", statement.getPrintableBasicAssemblyStatement().trim());
+            entry.put("source", statement.getSource().trim());
+            entry.put("file", statement.getSourceFile());
+            entry.put("line", statement.getSourceLine());
+            result.add(entry);
+        }
         return result;
     }
 

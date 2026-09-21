@@ -34,6 +34,7 @@ export interface InspectRequest {
   registers?: string[];
   memory?: ReadonlyArray<{ address: string; length: number }>;
   includeSymbols?: boolean;
+  includeInstructions?: boolean;
 }
 
 export interface ModifyRequest {

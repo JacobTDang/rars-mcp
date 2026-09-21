@@ -55,6 +55,13 @@ public final class RarsSimulatorSelfTest {
         requireSymbol(symbols, "helper_value", "data", false, null);
         requireSymbol(symbols, "helper", "text", true, null);
         require(symbols.size() == 4, "symbol count " + symbols.size());
+        List<Map<String, Object>> instructions = simulator.instructions();
+        Map<String, Object> first = instructions.get(0);
+        require("0x00400000".equals(first.get("address")) && "0x00100513".equals(first.get("code")), "first instruction address and code");
+        require("li a0, 1".equals(first.get("source")) && Integer.valueOf(5).equals(first.get("line")), "first instruction source");
+        require(String.valueOf(first.get("basic")).startsWith("addi"), "first instruction basic " + first.get("basic"));
+        require(String.valueOf(first.get("file")).endsWith("debug.asm"), "first instruction file");
+        require(String.valueOf(instructions.get(instructions.size() - 1).get("file")).endsWith("debug-helper.asm"), "second file instructions");
         System.out.println("RarsSimulatorSelfTest PASS");
     }
 
