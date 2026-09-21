@@ -6,6 +6,7 @@ export interface CliRequest {
   programArgs?: string[];
   stdin?: string;
   maxSteps?: number;
+  instructionCount?: boolean;
   registers?: string[];
   memoryRanges?: string[];
 }
@@ -33,6 +34,7 @@ export function buildRarsArgs(request: CliRequest): string[] {
   const options = ['nc', 'me'];
   if (request.mode === 'assemble') options.push('a');
   if (request.maxSteps !== undefined) options.push(String(request.maxSteps));
+  if (request.instructionCount) options.push('ic');
   options.push(...(request.registers ?? []), ...(request.memoryRanges ?? []), ...request.files);
   if (request.programArgs?.length) options.push('pa', ...request.programArgs);
   return options;
