@@ -144,8 +144,8 @@ public final class BridgeServer {
             case "continue": return simulator.runUntilStop(payload.containsKey("maxSteps") ? integer(payload.get("maxSteps")) : 1_000_000);
             case "reset": return simulator.reset();
             case "pause": return simulator.snapshot();
-            case "breakpoint_add": simulator.addBreakpoint(integer(payload.get("address"))); return simulator.snapshot();
-            case "breakpoint_remove": simulator.removeBreakpoint(integer(payload.get("address"))); return simulator.snapshot();
+            case "breakpoint_add": return simulator.addBreakpoint(string(payload.get("address")));
+            case "breakpoint_remove": return simulator.removeBreakpoint(string(payload.get("address")));
             case "terminate": return simulator.snapshot();
             default: throw new IllegalArgumentException("Unknown debug action: " + action);
         }

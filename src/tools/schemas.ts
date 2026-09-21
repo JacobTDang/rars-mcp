@@ -31,7 +31,7 @@ export const isBreakpointAction = (action: string): action is typeof breakpointA
 export const debugCommandSchema = z.object({
   sessionId: z.string().uuid(),
   action: z.enum([...executionActions, ...breakpointActions]),
-  address: z.string().optional(),
+  address: z.string().describe('Breakpoint location: an address, a code label, or file:line').optional(),
   maxSteps: z.number().int().positive().optional(),
 }).superRefine((input, context) => {
   if (input.action !== 'continue' && input.maxSteps !== undefined) {
