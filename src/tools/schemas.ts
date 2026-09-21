@@ -9,6 +9,7 @@ export const runSchema = z.object({
   stdin: z.string().optional(),
   programArgs: z.array(z.string()).optional(),
   maxSteps: z.number().int().positive().optional(),
+  instructionCount: z.boolean().optional(),
   registers: z.array(z.string()).optional(),
   memoryRanges: z.array(z.string()).optional(),
   timeoutMs: z.number().int().positive().optional(),

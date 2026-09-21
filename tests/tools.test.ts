@@ -1,11 +1,29 @@
-import { mkdtemp, realpath, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import { runRars } from '../src/rars/cli.js';
 import { SessionStore } from '../src/sessions/store.js';
 import { createToolHandlers } from '../src/tools/handlers.js';
 import { Workspace } from '../src/workspace.js';
+
+describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
+  it('reports the instruction count', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({ files: ['hello.asm'], instructionCount: true });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({ instructionCount: 5 });
+    expect((result.structuredContent as { stderr: string }).stderr).not.toMatch(/^5$/m);
+  });
+});
 
 describe('headless tool handlers', () => {
   it('resolves files and returns structured assembly diagnostics', async () => {

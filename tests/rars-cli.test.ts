@@ -15,6 +15,12 @@ describe('buildRarsArgs', () => {
     ).toEqual(['nc', 'me', 'main.asm', 'library.asm', 'pa', 'one', 'two']);
   });
 
+  it('asks for the instruction count before register and file arguments', () => {
+    expect(buildRarsArgs({ mode: 'run', files: ['main.asm'], instructionCount: true, registers: ['t0'] })).toEqual([
+      'nc', 'me', 'ic', 't0', 'main.asm',
+    ]);
+  });
+
   it('uses assemble-only mode', () => {
     expect(buildRarsArgs({ mode: 'assemble', files: ['main.asm'] })).toEqual([
       'nc',

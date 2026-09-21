@@ -46,7 +46,7 @@ The RARS and bridge JAR paths default to `.cache/rars1_6.jar` and `java/bridge/b
 ## Tools
 
 - `rars_assemble`: assemble workspace source files and return diagnostics.
-- `rars_run`: execute workspace source files with stdin, program arguments, register output, memory ranges, step limits, and wall-clock limits.
+- `rars_run`: execute workspace source files with stdin, program arguments, register output, memory ranges, an instruction count, step limits, and wall-clock limits.
 - `rars_session_list`: list stateful headless and live sessions.
 - `rars_session_close`: close or disconnect a session.
 

@@ -1,6 +1,7 @@
 import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
+import { extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand } from '../sessions/types.js';
 import type { Workspace } from '../workspace.js';
@@ -39,13 +40,17 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
         ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
         ...(runInput.maxSteps === undefined ? {} : { maxSteps: runInput.maxSteps }),
+        ...(runInput.instructionCount ? { instructionCount: true } : {}),
         ...(runInput.registers === undefined ? {} : { registers: runInput.registers }),
         ...(runInput.memoryRanges === undefined ? {} : { memoryRanges: runInput.memoryRanges }),
       },
       timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
       maxOutputBytes: deps.maxOutputBytes,
     });
-    const diagnostics = parseDiagnostics(result.stderr);
+    // A killed or cut-off run never reaches the point where RARS prints the count.
+    const counted = runInput.instructionCount && !result.timedOut && !result.truncated
+      ? extractInstructionCount(result.stderr) : { stderr: result.stderr };
+    const diagnostics = parseDiagnostics(counted.stderr);
     const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
       diagnostics.some((item) => item.severity === 'error');
     const action = mode === 'assemble' ? 'Assembly' : 'Execution';
@@ -54,7 +59,7 @@ export function createToolHandlers(deps: ToolDependencies) {
       isError ? `${action} failed` : `${action} completed`;
     return {
       content: [{ type: 'text', text: summary }],
-      structuredContent: { ...result, diagnostics },
+      structuredContent: { ...result, ...counted, diagnostics },
       ...(isError ? { isError: true } : {}),
     };
   };
