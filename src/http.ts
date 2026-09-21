@@ -6,11 +6,9 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 
 import { loadConfig } from './config.js';
-import { runRars } from './rars/cli.js';
+import { createToolDependencies } from './dependencies.js';
 import { createMcpServer } from './server.js';
-import { SessionStore } from './sessions/store.js';
 import type { ToolDependencies } from './tools/handlers.js';
-import { Workspace } from './workspace.js';
 
 export interface HttpHandler {
   fetch(request: Request): Promise<Response>;
@@ -38,22 +36,8 @@ export function createHttpHandler(dependencies: ToolDependencies): HttpHandler {
 }
 
 async function main(): Promise<void> {
-  const config = loadConfig();
-  const workspace = await Workspace.create(config.workspaceRoot);
-  const sessions = new SessionStore();
-  const handler = createHttpHandler({
-    workspace,
-    sessions,
-    run: runRars,
-    javaExecutable: process.env.JAVA_EXECUTABLE ?? 'java',
-    rarsJar: config.rarsJar,
-    timeoutMs: config.executionTimeoutMs,
-    maxOutputBytes: config.maxOutputBytes,
-    bridgeJar: config.bridgeJar,
-    bridgeToken: process.env.RARS_HEADLESS_BRIDGE_TOKEN ?? 'internal-headless-bridge',
-    bridgeHost: config.bridgeHost,
-    liveDiscoveryDir: config.liveDiscoveryDir,
-  });
+  const dependencies = await createToolDependencies(loadConfig());
+  const handler = createHttpHandler(dependencies);
   const nodeHandler = toNodeHandler(handler);
   const port = Number(process.env.PORT ?? '3000');
   const server = createServer((request, response) => {
@@ -69,7 +53,7 @@ async function main(): Promise<void> {
   server.listen(port, '0.0.0.0', () => console.error(`RARS MCP listening on port ${port}`));
   const shutdown = async () => {
     server.close();
-    await sessions.closeAll();
+    await dependencies.sessions.closeAll();
     await handler.close();
   };
   process.once('SIGINT', () => void shutdown());
