@@ -12,7 +12,8 @@
     "test:run": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
     "start:http": "node dist/src/http.js",
-    "start:stdio": "node dist/src/stdio-proxy.js"
+    "start:stdio": "node dist/src/stdio.js",
+    "start:proxy": "node dist/src/stdio-proxy.js"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

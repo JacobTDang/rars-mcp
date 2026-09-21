@@ -20,6 +20,27 @@ docker exec -i rars-mcp node dist/src/stdio-proxy.js
 
 Ready-to-copy examples are in `examples/clients/`.
 
+## Run without Docker
+
+Requirements: Node.js 22 and a JDK (11 or later).
+
+```sh
+npm ci
+npm run build
+mkdir -p .cache
+curl -fsSL https://github.com/TheThirdOne/rars/releases/download/v1.6/rars1_6.jar -o .cache/rars1_6.jar
+scripts/verify-rars.sh
+scripts/build-java-bridge.sh
+```
+
+The stdio entry point runs the server in the client's process, so no HTTP server is needed. For Claude Code:
+
+```sh
+claude mcp add rars -e RARS_WORKSPACE=/path/to/your/asm/files -- node /path/to/rars-mcp/dist/src/stdio.js
+```
+
+The RARS and bridge JAR paths default to `.cache/rars1_6.jar` and `java/bridge/build/rars-mcp-bridge.jar` in this checkout. Set `RARS_JAR`, `RARS_BRIDGE_JAR`, or `RARS_WORKSPACE` to override them.
+
 ## Tools
 
 - `rars_assemble`: assemble workspace source files and return diagnostics.
