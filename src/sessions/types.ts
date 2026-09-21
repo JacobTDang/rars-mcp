@@ -14,7 +14,7 @@ export interface Word {
   signed: number;
 }
 
-export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'exited' | 'ran_off_end' | 'exception' | 'backstep';
+export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'exited' | 'ran_off_end' | 'exception' | 'backstep' | 'terminated';
 
 export interface MachineState {
   status: SessionState;
