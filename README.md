@@ -6,6 +6,10 @@ programs, step through them in a real debugger, read registers and memory, list 
 assembled instructions, write memory images for hardware simulation, and drive a visible RARS
 desktop session.
 
+[![rars-mcp demo video](docs/media/rars-mcp.jpg)](docs/media/rars-mcp.mp4)
+
+<sub>20-second demo. Click the image to play it.</sub>
+
 ## Quick start
 
 Requirements: Node.js 22 and a JDK 11 or later.
