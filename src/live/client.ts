@@ -21,8 +21,10 @@ export class LiveClient implements SessionBackend {
     try {
       await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
     } catch (error) {
-      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ECONNREFUSED') {
-        throw new Error(`The discovery files in ${options.directory ?? ''} point at a RARS desktop session that is no longer running (connection refused on ${options.host}:${options.port}). Start the desktop launcher again.`);
+      const refused = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
+      if (refused && options.directory !== undefined) {
+        throw new Error(`The discovery files in ${options.directory} point at a RARS desktop session that is no longer running `
+          + `(connection refused on ${options.host}:${options.port}). Start the desktop launcher again.`);
       }
       throw error;
     }
