@@ -7,6 +7,14 @@ export interface ResolveOptions {
   allowMissing?: boolean;
 }
 
+// Extra folders supplied by the client at run time, for example its MCP roots.
+export type RootsProvider = () => Promise<string[]>;
+
+interface Roots {
+  configured: readonly string[];
+  canonical: readonly string[];
+}
+
 function contains(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot);
@@ -18,9 +26,31 @@ export class Workspace {
   // The same folders as configured, before symlinks are resolved.
   private readonly configuredRoots: readonly string[];
 
+  private provider: RootsProvider | undefined;
+  private provided: Promise<Roots> | undefined;
+
   private constructor(configuredRoots: string[], roots: string[]) {
     this.configuredRoots = configuredRoots;
     this.roots = roots;
+  }
+
+  // The provider is asked once and the answer reused until the client says its roots changed.
+  useRootsProvider(provider: RootsProvider): void {
+    this.provider = provider;
+    this.provided = undefined;
+  }
+
+  rootsChanged(): void {
+    this.provided = undefined;
+  }
+
+  private async providedRoots(): Promise<Roots> {
+    if (this.provider === undefined) return { configured: [], canonical: [] };
+    this.provided ??= (async (provider: RootsProvider): Promise<Roots> => {
+      const configured = (await provider()).map((root) => resolve(root));
+      return { configured, canonical: await Promise.all(configured.map((root) => realpath(root))) };
+    })(this.provider);
+    return this.provided;
   }
 
   get root(): string {
@@ -37,9 +67,11 @@ export class Workspace {
 
   async resolve(requestedPath: string, options: ResolveOptions = {}): Promise<string> {
     const candidate = isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(this.root, requestedPath);
+    const provided = await this.providedRoots();
 
     // Checked before touching the filesystem, so an outside path never reveals whether it exists.
-    if (![...this.configuredRoots, ...this.roots].some((root) => contains(root, candidate))) {
+    const lexicalRoots = [...this.configuredRoots, ...this.roots, ...provided.configured, ...provided.canonical];
+    if (!lexicalRoots.some((root) => contains(root, candidate))) {
       this.outside(requestedPath);
     }
 
@@ -58,7 +90,8 @@ export class Workspace {
       canonicalCandidate = join(canonicalParent, candidate.slice(dirname(candidate).length + 1));
     }
 
-    if (!this.roots.some((root) => contains(root, canonicalCandidate))) this.outside(requestedPath);
+    const canonicalRoots = [...this.roots, ...provided.canonical];
+    if (!canonicalRoots.some((root) => contains(root, canonicalCandidate))) this.outside(requestedPath);
     return canonicalCandidate;
   }
 

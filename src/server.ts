@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
@@ -10,7 +12,8 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     { name: 'rars-mcp', version: '0.1.0' },
     {
       instructions: `Workspace folders: ${folders}. Relative file paths resolve against the first folder; `
-        + 'absolute paths may point into any of them. Headless calls are isolated.',
+        + 'absolute paths may point into any of them, and into any folder this client advertises as a root. '
+        + 'Headless calls are isolated.',
     },
   );
 
@@ -48,5 +51,18 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('rars_live_command', {
     description: 'Load, inspect, modify, or drive the visible RARS desktop session. This mutates the open GUI.', inputSchema: liveCommandSchema,
   }, handlers.liveCommand);
+  // A client that advertises roots tells us which folders it is working in, so the
+  // workspace follows the client instead of the folder this server started in.
+  server.server.oninitialized = () => {
+    if (server.server.getClientCapabilities()?.roots === undefined) return;
+    dependencies.workspace.useRootsProvider(async () => {
+      const { roots } = await server.server.listRoots();
+      return roots.filter((root) => root.uri.startsWith('file://')).map((root) => fileURLToPath(root.uri));
+    });
+  };
+  server.server.setNotificationHandler(
+    'notifications/roots/list_changed', () => dependencies.workspace.rootsChanged(),
+  );
+
   return server;
 }
