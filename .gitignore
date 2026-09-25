@@ -10,3 +10,4 @@ java/bridge/build/
 *.log
 .DS_Store
 .linkc/
+brag-output/
