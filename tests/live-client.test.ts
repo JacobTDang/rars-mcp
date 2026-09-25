@@ -1,7 +1,11 @@
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { LiveClient } from '../src/live/client.js';
+import { discoverLiveSession } from '../src/live/discovery.js';
 
 async function fakeBridge(token: string, mode = 'live') {
   const server = createServer((socket) => {
@@ -46,5 +50,15 @@ describe('LiveClient', () => {
     const second = await fakeBridge('secret', 'headless');
     await expect(LiveClient.connect({ host: '127.0.0.1', port: second.port, token: 'secret', timeoutMs: 1000 })).rejects.toThrow('not a live RARS session');
     second.server.close();
+  });
+});
+
+describe('discoverLiveSession', () => {
+  it('reports the directory it read, so a failed connection can name it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rars-discovery-'));
+    await writeFile(join(directory, 'token'), 'secret\n');
+    await writeFile(join(directory, 'port'), '12345');
+
+    await expect(discoverLiveSession(directory)).resolves.toEqual({ port: 12345, token: 'secret', directory });
   });
 });

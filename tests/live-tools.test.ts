@@ -40,6 +40,28 @@ describe('live tools', () => {
     server.close();
   });
 
+  it('says the discovery files are stale when nothing answers on the port', async () => {
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
+    const port = (closed.address() as { port: number }).port;
+    await new Promise<void>((resolve) => closed.close(() => resolve()));
+
+    const discovery = await mkdtemp(join(tmpdir(), 'rars-live-'));
+    await writeFile(join(discovery, 'token'), 'secret\n');
+    await writeFile(join(discovery, 'port'), String(port));
+    const root = await mkdtemp(join(tmpdir(), 'rars-live-workspace-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => { throw new Error('unused'); },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+      bridgeHost: '127.0.0.1', liveDiscoveryDir: discovery,
+    });
+
+    await expect(handlers.liveConnect({})).rejects.toThrow(
+      `The discovery files in ${discovery} point at a RARS desktop session that is no longer running `
+      + `(connection refused on 127.0.0.1:${port}). Start the desktop launcher again.`,
+    );
+  });
+
   it('refuses to connect when no bridge host is configured', async () => {
     const discovery = await mkdtemp(join(tmpdir(), 'rars-live-'));
     const root = await mkdtemp(join(tmpdir(), 'rars-live-workspace-'));
