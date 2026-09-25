@@ -30,13 +30,11 @@ export function createToolHandlers(deps: ToolDependencies) {
   const execute = async (input: AssembleInput | RunInput, mode: 'assemble' | 'run'): Promise<ToolResult> => {
     const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
     const runInput = input as RunInput;
-    const dumps = await Promise.all((input.dump ?? []).map(async (dump) => {
-      dumpSchema.parse(dump);
-      return {
-      ...dump,
+    // Parsed again here because a direct handler call does not pass through the tool schema.
+    const dumps = await Promise.all((input.dump ?? []).map(async (dump) => ({
+      ...dumpSchema.parse(dump),
       file: await deps.workspace.resolve(dump.file, { allowMissing: true }),
-      };
-    }));
+    })));
     const result = await deps.run({
       javaExecutable: deps.javaExecutable,
       rarsJar: deps.rarsJar,
