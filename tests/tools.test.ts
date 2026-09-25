@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, realpath, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -47,6 +47,43 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
       ],
     });
     expect((result.structuredContent as { stderr: string }).stderr).not.toContain('a7\t');
+  });
+});
+
+describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
+  it('writes a memory image inside the workspace and reports it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.assemble({
+      files: ['hello.asm'],
+      dump: [{ segment: '.text', format: 'HexText', file: 'imem.hex' }],
+    });
+
+    expect(result.isError).toBeFalsy();
+    const image = await readFile(join(await realpath(root), 'imem.hex'), 'utf8');
+    expect(image.split('\n')[0]).toMatch(/^[0-9a-f]{8}$/);
+    expect(result.structuredContent).toMatchObject({
+      dumps: [{ segment: '.text', format: 'HexText', file: join(await realpath(root), 'imem.hex') }],
+    });
+  });
+
+  it('rejects a dump format RARS does not accept', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    await expect(handlers.assemble({
+      files: ['hello.asm'],
+      dump: [{ segment: '.text', format: 'NotAFormat' as never, file: 'imem.hex' }],
+    })).rejects.toThrow(/format/);
   });
 });
 

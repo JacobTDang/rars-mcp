@@ -21,6 +21,22 @@ describe('buildRarsArgs', () => {
     ]);
   });
 
+  it('passes each dump before the source files', () => {
+    expect(buildRarsArgs({
+      mode: 'assemble',
+      files: ['main.asm'],
+      dumps: [
+        { segment: '.text', format: 'HexText', file: 'mem/imem.hex' },
+        { segment: '.data', format: 'HexText', file: 'mem/dmem.hex' },
+      ],
+    })).toEqual([
+      'nc', 'me', 'a',
+      'dump', '.text', 'HexText', 'mem/imem.hex',
+      'dump', '.data', 'HexText', 'mem/dmem.hex',
+      'main.asm',
+    ]);
+  });
+
   it('uses assemble-only mode', () => {
     expect(buildRarsArgs({ mode: 'assemble', files: ['main.asm'] })).toEqual([
       'nc',
