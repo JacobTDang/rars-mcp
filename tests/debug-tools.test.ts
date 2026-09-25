@@ -2,15 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { SessionStore } from '../src/sessions/store.js';
 import { createToolHandlers } from '../src/tools/handlers.js';
 import { Workspace } from '../src/workspace.js';
 
 describe.runIf(process.env.RARS_JAR)('debug tools', () => {
-  beforeAll(() => execFileSync('scripts/build-java-bridge.sh'));
-
   it('starts, inspects, mutates, steps, and closes a debug session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
     execFileSync('cp', ['tests/fixtures/debug.asm', join(root, 'debug.asm')]);

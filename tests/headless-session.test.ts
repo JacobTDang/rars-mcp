@@ -1,12 +1,9 @@
 import { resolve } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { describe, expect, it } from 'vitest';
 
 import { HeadlessSession } from '../src/sessions/headless.js';
 
 describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
-  beforeAll(() => execFileSync('scripts/build-java-bridge.sh', { stdio: 'inherit' }));
-
   it('controls a stateful RARS process and closes it', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java',
