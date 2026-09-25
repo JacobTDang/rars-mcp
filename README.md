@@ -6,9 +6,10 @@ programs, step through them in a real debugger, read registers and memory, list 
 assembled instructions, write memory images for hardware simulation, and drive a visible RARS
 desktop session.
 
-[![rars-mcp demo video](docs/media/rars-mcp.jpg)](docs/media/rars-mcp.mp4)
+![rars-mcp demo](docs/media/rars-mcp.gif)
 
-<sub>20-second demo. Click the image to play it.</sub>
+<sub>Assemble, run, break on a label, dump a memory image — 20 seconds, no sound.
+[Watch the MP4](docs/media/rars-mcp.mp4) for full resolution and the soundtrack.</sub>
 
 ## Quick start
 
