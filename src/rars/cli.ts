@@ -9,6 +9,7 @@ export interface CliRequest {
   instructionCount?: boolean;
   registers?: string[];
   memoryRanges?: string[];
+  dumps?: { segment: string; format: string; file: string }[];
 }
 
 export interface RunRarsOptions {
@@ -35,7 +36,9 @@ export function buildRarsArgs(request: CliRequest): string[] {
   if (request.mode === 'assemble') options.push('a');
   if (request.maxSteps !== undefined) options.push(String(request.maxSteps));
   if (request.instructionCount) options.push('ic');
-  options.push(...(request.registers ?? []), ...(request.memoryRanges ?? []), ...request.files);
+  options.push(...(request.registers ?? []), ...(request.memoryRanges ?? []));
+  for (const dump of request.dumps ?? []) options.push('dump', dump.segment, dump.format, dump.file);
+  options.push(...request.files);
   if (request.programArgs?.length) options.push('pa', ...request.programArgs);
   return options;
 }

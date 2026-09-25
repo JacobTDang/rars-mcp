@@ -1,7 +1,14 @@
 import { z } from 'zod';
 
+export const dumpSchema = z.object({
+  segment: z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/),
+  format: z.enum(['SegmentWindow', 'HexText', 'AsciiText', 'HEX', 'Binary', 'BinaryText']),
+  file: z.string().min(1),
+});
+
 export const assembleSchema = z.object({
   files: z.array(z.string().min(1)).min(1),
+  dump: z.array(dumpSchema).optional(),
 });
 
 export const runSchema = z.object({
@@ -13,6 +20,7 @@ export const runSchema = z.object({
   registers: z.array(z.string()).optional(),
   memoryRanges: z.array(z.string()).optional(),
   timeoutMs: z.number().int().positive().optional(),
+  dump: z.array(dumpSchema).optional(),
 });
 
 export const closeSessionSchema = z.object({ sessionId: z.string().uuid() });
