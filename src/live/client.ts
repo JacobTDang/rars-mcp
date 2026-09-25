@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { DebugCommand, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
 
-export interface LiveConnectionOptions { host: string; port: number; token: string; timeoutMs: number }
+export interface LiveConnectionOptions { host: string; port: number; token: string; directory?: string; timeoutMs: number }
 interface Response { id: string; ok: boolean; result?: Record<string, unknown>; error?: { message: string } }
 
 export class LiveClient implements SessionBackend {
@@ -18,7 +18,14 @@ export class LiveClient implements SessionBackend {
 
   static async connect(options: LiveConnectionOptions): Promise<LiveClient> {
     const socket = createConnection({ host: options.host, port: options.port });
-    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+    try {
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+    } catch (error) {
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ECONNREFUSED') {
+        throw new Error(`The discovery files in ${options.directory ?? ''} point at a RARS desktop session that is no longer running (connection refused on ${options.host}:${options.port}). Start the desktop launcher again.`);
+      }
+      throw error;
+    }
     const client = new LiveClient(socket, options.timeoutMs);
     try {
       const hello = await client.request('hello', { token: options.token });
