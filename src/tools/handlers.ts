@@ -8,7 +8,7 @@ import type { Workspace } from '../workspace.js';
 import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
 import { discoverLiveSession } from '../live/discovery.js';
-import { isBreakpointAction, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
+import { dumpSchema, isBreakpointAction, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -30,6 +30,13 @@ export function createToolHandlers(deps: ToolDependencies) {
   const execute = async (input: AssembleInput | RunInput, mode: 'assemble' | 'run'): Promise<ToolResult> => {
     const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
     const runInput = input as RunInput;
+    const dumps = await Promise.all((input.dump ?? []).map(async (dump) => {
+      dumpSchema.parse(dump);
+      return {
+      ...dump,
+      file: await deps.workspace.resolve(dump.file, { allowMissing: true }),
+      };
+    }));
     const result = await deps.run({
       javaExecutable: deps.javaExecutable,
       rarsJar: deps.rarsJar,
@@ -43,6 +50,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(runInput.instructionCount ? { instructionCount: true } : {}),
         ...(runInput.registers === undefined ? {} : { registers: runInput.registers }),
         ...(runInput.memoryRanges === undefined ? {} : { memoryRanges: runInput.memoryRanges }),
+        ...(dumps.length ? { dumps } : {}),
       },
       timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
       maxOutputBytes: deps.maxOutputBytes,
@@ -62,7 +70,7 @@ export function createToolHandlers(deps: ToolDependencies) {
       isError ? `${action} failed` : `${action} completed`;
     return {
       content: [{ type: 'text', text: summary }],
-      structuredContent: { ...result, ...output, diagnostics },
+      structuredContent: { ...result, ...output, diagnostics, ...(dumps.length ? { dumps } : {}) },
       ...(isError ? { isError: true } : {}),
     };
   };
