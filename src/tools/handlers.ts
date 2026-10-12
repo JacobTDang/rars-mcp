@@ -26,6 +26,22 @@ export interface ToolDependencies {
 
 export type ToolResult = CallToolResult;
 
+const ERROR_TERMINATION = 'Processing terminated due to errors.';
+
+function formatErrorDetails(stderr: string, diagnostics: ReturnType<typeof parseDiagnostics>): string[] {
+  const formatted = diagnostics.map((diagnostic) => {
+    const location = [diagnostic.file, diagnostic.line, diagnostic.column]
+      .filter((part) => part !== undefined)
+      .join(':');
+    return `${location}: ${diagnostic.message}`;
+  });
+  const remaining = stderr
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '' && line.trim() !== ERROR_TERMINATION)
+    .filter((line) => parseDiagnostics(line).length === 0);
+  return [...formatted, ...remaining];
+}
+
 export function createToolHandlers(deps: ToolDependencies) {
   const execute = async (input: AssembleInput | RunInput, mode: 'assemble' | 'run'): Promise<ToolResult> => {
     const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
@@ -66,8 +82,9 @@ export function createToolHandlers(deps: ToolDependencies) {
     const summary = result.timedOut ? `${action} timed out` :
       result.truncated ? `${action} output exceeded its limit` :
       isError ? `${action} failed` : `${action} completed`;
+    const text = isError ? [summary, ...formatErrorDetails(output.stderr, diagnostics)].join('\n') : summary;
     return {
-      content: [{ type: 'text', text: summary }],
+      content: [{ type: 'text', text }],
       structuredContent: { ...result, ...output, diagnostics, ...(dumps.length ? { dumps } : {}) },
       ...(isError ? { isError: true } : {}),
     };

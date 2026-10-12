@@ -88,12 +88,12 @@ describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
 });
 
 describe('headless tool handlers', () => {
-  it('resolves files and returns structured assembly diagnostics', async () => {
+  it('surfaces assembly diagnostics in text content', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await writeFile(join(root, 'bad.asm'), 'bad');
     const run = vi.fn(async () => ({
-      exitCode: 1, signal: null, stdout: '',
-      stderr: `Error in ${join(root, 'bad.asm')} line 1 column 1: bad instruction\n`,
+      exitCode: 0, signal: null, stdout: '',
+      stderr: `Error in ${join(root, 'bad.asm')} line 1 column 1: bad instruction\nProcessing terminated due to errors.\n`,
       timedOut: false, truncated: false,
     }));
     const handlers = createToolHandlers({
@@ -111,6 +111,51 @@ describe('headless tool handlers', () => {
     }));
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ diagnostics: [{ line: 1, column: 1 }] });
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: `Assembly failed\n${join(root, 'bad.asm')}:1:1: bad instruction`,
+    }]);
+  });
+
+  it('surfaces a runtime exception in text content', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'fault.asm'), 'fault');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async () => ({
+        exitCode: 1, signal: null, stdout: '',
+        stderr: 'Runtime exception at 0x00400010: address out of range\n',
+        timedOut: false, truncated: false,
+      }),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['fault.asm'] });
+
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed\nRuntime exception at 0x00400010: address out of range',
+    }]);
+  });
+
+  it('surfaces the stderr message when a program exits non-zero', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'exit.asm'), 'exit');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async () => ({
+        exitCode: 7, signal: null, stdout: '', stderr: 'Program exited with status 7\n',
+        timedOut: false, truncated: false,
+      }),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['exit.asm'] });
+
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed\nProgram exited with status 7',
+    }]);
   });
 
   it('reports timeouts as readable run results', async () => {
