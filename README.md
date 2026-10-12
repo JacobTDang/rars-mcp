@@ -146,10 +146,11 @@ program. For file-backed dumps, the target folder must already exist.
 
 ### VHDL
 
-`vhdl_compile` and `vhdl_run` run nvc, which is installed separately (`brew install nvc` on macOS)
-and is not in the Docker image; set `VHDL_SIMULATOR` if it is not on `PATH`. They build the design
-library in a temporary folder that is removed after each call, so only a requested wave file is
-written to the workspace, and they share the wall-clock and output limits of a RARS run.
+`vhdl_compile`, `vhdl_run` and `vhdl_mutate` run nvc, which is installed separately
+(`brew install nvc` on macOS) and is not in the Docker image; set `VHDL_SIMULATOR` if it is not on
+`PATH`. They build the design library in a temporary folder that is removed after each call, so
+only a requested wave file is written to the workspace, and they share the wall-clock and output
+limits of a RARS run.
 
 - **`vhdl_compile`** — analyse VHDL files in the given order and return diagnostics with file, line
   and column. Options: `std` (`93`, `02`, `08` or `19`; `08` by default, `02` matches Questa's
@@ -173,6 +174,23 @@ written to the workspace, and they share the wall-clock and output limits of a R
   - `wave: { "file": "waves/tb.vcd" }` writes a waveform of the run. `format` is `vcd`, which
     `wave_query` reads, or `fst`, the default for a file ending in `.fst`. The target folder must
     already exist.
+- **`vhdl_mutate`** — check that testbenches catch real bugs. Each mutation is applied to a copy
+  of `file` in a temporary folder, and each of `testbenches` (`{ "top", "files" }`, where `files`
+  must include `file`) runs with the copy in its place. A testbench catches the mutation when it
+  fails. `mutations` are literal substitutions, `{ "find", "replace" }` with an optional `name`
+  and `occurrence` (counted from 1; every match by default), and a `find` that matches nothing is
+  an error. Without them, each operator in the file's statements becomes one mutation, up to 64:
+  `+`/`-`, `and`/`or`, `=`/`/=`, `<`/`>=`, `<=`/`>`, `'0'`/`'1'` in assignments, and removing
+  `not`. Options: `std`, `stopTime` and `timeoutMs`, the limit for each run.
+
+  ```json
+  { "mutations": [{ "name": "line 18: + -> -", "line": 18, "caught": true,
+                    "caughtBy": ["adder_tb"], "missedBy": ["adder_weak_tb"] }],
+    "score": { "caught": 1, "total": 1, "ratio": 1 } }
+  ```
+
+  The unmutated design runs first. If a testbench fails on it, no mutation runs and the result is
+  an error, as it is for a mutated copy that does not analyse. A low score is not an error.
 - **`wave_query`** — read signal values from a VCD waveform at chosen times, so a check like "is
   `s_ovfl` 1 at 20 ns?" needs no waveform viewer. Signals are hierarchical names such as
   `tb_alu.s_ovfl` or `tb_alu/dut/s_sum`, matched ignoring case. Times look like `20 ns`, `1.5us`,
