@@ -91,7 +91,9 @@ hardware simulation needs. The target folder must already exist.
     even `count` the extra instruction comes after. `instructions: {}` is the 10 around `pc`.
   - `instructions: { from, to }` returns every instruction from one location to the other,
     inclusive, and refuses a range of more than 200.
-  - An unknown label, or an address with no instruction, is an error.
+  - An unknown label, or an address with no instruction, is an error. The exception is `pc` with
+    no instruction, as after the program exits: the window then ends at the last instruction below
+    `pc`, so `instructions: {}` shows the program's last 10.
   - `includeInstructions: true` still returns the whole program, but is deprecated.
 - **`rars_modify`** — write registers or memory.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for

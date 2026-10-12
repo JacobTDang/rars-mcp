@@ -105,7 +105,11 @@ public final class RarsSimulatorSelfTest {
 
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         simulator.runUntilStop(1000);
-        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 10), "No instruction at pc (0x00400010)", "window after exit");
+        require(addresses(simulator.instructionsAround("pc", 10)).equals(program.subList(0, 4)), "window after exit");
+        require(addresses(simulator.instructionsAround("pc", 2)).equals(program.subList(2, 4)), "window after exit ends at the last instruction");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("0x00400010", 3), "No instruction at 0x00400010", "address past the end");
+        simulator.setRegister("pc", 0x00300000);
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 3), "No instruction at pc (0x00300000)", "pc below the program");
 
         // Longer than the window limit, with a label in the middle.
         Path longProgram = Files.createTempFile("rars-window", ".asm");
@@ -119,6 +123,9 @@ public final class RarsSimulatorSelfTest {
         require(simulator.instructionsBetween("main", "0x0040031c").size() == 200, "range at the limit");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "0x004003e4"),
                 "The range main to 0x004003e4 holds 250 instructions; the limit is 200", "range over the limit");
+        simulator.runUntilStop(1000);
+        List<String> tail = addresses(simulator.instructionsAround("pc", 10));
+        require(tail.size() == 10 && tail.get(0).equals("0x004003c0") && tail.get(9).equals("0x004003e4"), "last 10 instructions after running off the end");
         System.out.println("RarsSimulatorSelfTest PASS");
     }
 
