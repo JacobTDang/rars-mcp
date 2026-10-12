@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/server';
 
+import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
@@ -26,6 +27,10 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Run RISC-V source files in an isolated headless RARS process.',
     inputSchema: runSchema,
   }, handlers.run);
+  server.registerTool('rars_eval', {
+    description: 'Run RV32I/M ALU cases through RARS and return each rd, optionally as a VHDL testbench table.',
+    inputSchema: evalSchema,
+  }, createEvalHandler(dependencies));
   server.registerTool('rars_session_list', {
     description: 'List isolated and connected live RARS sessions.',
     inputSchema: emptySchema,
