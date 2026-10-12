@@ -48,6 +48,9 @@ outside them is refused. Folders come from, in order:
 
 ## Tools
 
+- **`rars_status`** — check the setup without writing a program: RARS and Java versions, the bridge
+  JAR, workspace folders and client roots, and open sessions. Each missing piece is reported in its own field.
+
 ### Running programs
 
 - **`rars_assemble`** — assemble source files and return structured diagnostics.
