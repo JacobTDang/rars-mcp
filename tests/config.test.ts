@@ -18,6 +18,7 @@ describe('loadConfig', () => {
       maxOutputBytes: 1_048_576,
       maxInspectionBytes: 65_536,
       sessionIdleMs: 1_800_000,
+      waveMaxBytes: 67_108_864,
     });
     expect(loadConfig({ RARS_WORKSPACE: workspaceRoot, RARS_SESSION_IDLE_MS: '60000' }).sessionIdleMs).toBe(60_000);
   });
@@ -42,6 +43,14 @@ describe('loadConfig', () => {
 
   it('rejects a workspace list with no folders', () => {
     expect(() => loadConfig({ RARS_WORKSPACE: delimiter })).toThrow('RARS_WORKSPACE must name at least one folder');
+  });
+
+  it('reads the wave file size limit', () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'rars-config-'));
+
+    expect(loadConfig({ RARS_WORKSPACE: workspaceRoot, WAVE_MAX_BYTES: '1024' }).waveMaxBytes).toBe(1024);
+    expect(() => loadConfig({ RARS_WORKSPACE: workspaceRoot, WAVE_MAX_BYTES: '0' }))
+      .toThrow('WAVE_MAX_BYTES must be a positive integer');
   });
 
   it('rejects a non-positive execution timeout', () => {
