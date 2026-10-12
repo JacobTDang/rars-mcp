@@ -89,6 +89,29 @@ configured. `words` is at most 65536. `format` is one of `SegmentWindow`, `HexTe
 `HEX`, `Binary`, `BinaryText`. With `rars_assemble` the image is produced without running the
 program. For file-backed dumps, the target folder must already exist.
 
+### Encoding instructions
+
+- **`rars_encode`** — encode up to 200 instructions with RARS's own assembler. Each comes back
+  with its basic form and one word per basic instruction (a pseudo-instruction such as `li` may
+  give two). A word has its hex, its format (`R`, `R4`, `I`, `S`, `B`, `U` or `J`) and its fields as
+  numbers:
+
+  ```json
+  { "source": "sw t2, -4(sp)", "basic": ["sw x7,0xfffffffc(x2)"],
+    "words": [{ "hex": "0xfe712e23", "format": "S",
+                "fields": { "opcode": 35, "funct3": 2, "rs1": 2, "rs2": 7, "imm": -4 } }] }
+  ```
+
+  - `imm` is signed and already put back together for `S`, `B` and `J`; for `U` it is the 20-bit
+    upper value. Shift-immediates are `I` with `shamt` and `funct7`; `fmadd` and the other fused
+    multiply-adds are `R4` with `rs3` and `funct2`.
+  - A branch or jump target may be a number, read as a byte offset from the instruction:
+    `beq x1, x2, -8`. RARS itself takes only a label there, so the tool puts a label at that offset.
+  - The instructions are assembled one after another as one program, so one can branch to a label
+    on another.
+  - An instruction RARS rejects comes back as `{ source, error }` with RARS's message. The call
+    fails only when no instruction encodes.
+
 ### Debugging
 
 - **`rars_debug_start`** — start an isolated debugger session on one or more files.

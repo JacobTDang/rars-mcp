@@ -4,18 +4,21 @@ import { createConnection, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
-import type { DebugCommand, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
+import type { DebugCommand, EncodedInstruction, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
-interface HeadlessOptions {
+interface BridgeOptions {
   javaExecutable: string;
   bridgeJar: string;
   rarsJar: string;
   token: string;
   bridgeToken?: string;
+  timeoutMs: number;
+}
+
+interface HeadlessOptions extends BridgeOptions {
   files: string[];
   programArgs?: string[];
   stdin?: string;
-  timeoutMs: number;
 }
 
 interface BridgeResponse {
@@ -43,6 +46,31 @@ export class HeadlessSession implements SessionBackend {
   }
 
   static async create(options: HeadlessOptions): Promise<HeadlessSession> {
+    const session = await HeadlessSession.start(options);
+    try {
+      const state = await session.request('load', {
+        files: options.files, programArgs: options.programArgs ?? [], stdin: options.stdin ?? '',
+      });
+      session.updateState(state);
+      return session;
+    } catch (error) {
+      session.kill();
+      throw error;
+    }
+  }
+
+  // In a bridge of its own: assembling resets RARS's global state, which a loaded program depends on.
+  static async encode(options: BridgeOptions, instructions: readonly string[]): Promise<EncodedInstruction[]> {
+    const session = await HeadlessSession.start(options);
+    try {
+      const result = await session.request('encode', { instructions });
+      return result.instructions as EncodedInstruction[];
+    } finally {
+      await session.close();
+    }
+  }
+
+  private static async start(options: BridgeOptions): Promise<HeadlessSession> {
     const serverToken = options.bridgeToken ?? options.token;
     const child = spawn(options.javaExecutable, [
       '-cp', `${options.bridgeJar}${delimiter}${options.rarsJar}`,
@@ -63,14 +91,9 @@ export class HeadlessSession implements SessionBackend {
     const session = new HeadlessSession(child, socket, options.timeoutMs);
     try {
       await session.request('hello', { token: options.token });
-      const state = await session.request('load', {
-        files: options.files, programArgs: options.programArgs ?? [], stdin: options.stdin ?? '',
-      });
-      session.updateState(state);
       return session;
     } catch (error) {
-      socket.destroy();
-      child.kill('SIGKILL');
+      session.kill();
       throw error;
     }
   }
@@ -113,6 +136,11 @@ export class HeadlessSession implements SessionBackend {
   }
 
   isClosed(): boolean { return this.closed; }
+
+  private kill(): void {
+    this.socket.destroy();
+    this.child.kill('SIGKILL');
+  }
 
   private request(command: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const id = randomUUID();

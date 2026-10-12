@@ -8,7 +8,7 @@ import java.util.Set;
 
 public final class BridgeRequest {
     private static final Set<String> COMMANDS = new HashSet<>(Arrays.asList(
-        "hello", "load", "assemble", "command", "inspect", "modify", "close"
+        "hello", "load", "assemble", "command", "inspect", "modify", "encode", "close"
     ));
     public final int protocolVersion;
     public final String id;
