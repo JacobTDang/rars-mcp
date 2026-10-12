@@ -9,6 +9,7 @@ import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
 import { discoverLiveSession } from '../live/discovery.js';
 import { dumpSchema, isBreakpointAction, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
+import { prepareSource, withPreparedSource } from './source.js';
 
 export interface ToolDependencies {
   workspace: Workspace;
@@ -44,38 +45,47 @@ function formatErrorDetails(stderr: string, diagnostics: ReturnType<typeof parse
 
 export function createToolHandlers(deps: ToolDependencies) {
   const execute = async (input: AssembleInput | RunInput, mode: 'assemble' | 'run'): Promise<ToolResult> => {
-    const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
     const runInput = input as RunInput;
     // Parsed again here because a direct handler call does not pass through the tool schema.
     const dumps = await Promise.all((input.dump ?? []).map(async (dump) => ({
       ...dumpSchema.parse(dump),
       file: await deps.workspace.resolve(dump.file, { allowMissing: true }),
     })));
-    const result = await deps.run({
-      javaExecutable: deps.javaExecutable,
-      rarsJar: deps.rarsJar,
-      cwd: deps.workspace.root,
-      request: {
-        mode,
-        files,
-        ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
-        ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
-        ...(runInput.maxSteps === undefined ? {} : { maxSteps: runInput.maxSteps }),
-        ...(runInput.instructionCount ? { instructionCount: true } : {}),
-        ...(runInput.registers === undefined ? {} : { registers: runInput.registers }),
-        ...(runInput.memoryRanges === undefined ? {} : { memoryRanges: runInput.memoryRanges }),
-        ...(dumps.length ? { dumps } : {}),
-      },
-      timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
-      maxOutputBytes: deps.maxOutputBytes,
-    });
+    const source = input.source === undefined ? undefined : await prepareSource(input.source);
+    const files = source?.files ?? await Promise.all(input.files!.map((file) => deps.workspace.resolve(file)));
+    let result: CliResult;
+    try {
+      result = await deps.run({
+        javaExecutable: deps.javaExecutable,
+        rarsJar: deps.rarsJar,
+        cwd: source?.directory ?? deps.workspace.root,
+        request: {
+          mode,
+          files,
+          ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
+          ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
+          ...(runInput.maxSteps === undefined ? {} : { maxSteps: runInput.maxSteps }),
+          ...(runInput.instructionCount ? { instructionCount: true } : {}),
+          ...(runInput.registers === undefined ? {} : { registers: runInput.registers }),
+          ...(runInput.memoryRanges === undefined ? {} : { memoryRanges: runInput.memoryRanges }),
+          ...(dumps.length ? { dumps } : {}),
+        },
+        timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
+        maxOutputBytes: deps.maxOutputBytes,
+      });
+    } finally {
+      await source?.cleanup();
+    }
     // A killed or cut-off run never reaches the point where RARS prints the count and dumps.
     const finished = !result.timedOut && !result.truncated;
     const dumpsRequested = runInput.registers !== undefined || runInput.memoryRanges !== undefined;
     const dumped = finished && dumpsRequested ? extractDumps(result.stderr) : { stderr: result.stderr };
     const counted = finished && runInput.instructionCount ? extractInstructionCount(dumped.stderr) : {};
     const output = { ...dumped, ...counted };
-    const diagnostics = parseDiagnostics(output.stderr);
+    const diagnostics = parseDiagnostics(output.stderr).map((diagnostic) => ({
+      ...diagnostic,
+      ...(diagnostic.file === undefined || source === undefined ? {} : { file: source.remapFile(diagnostic.file) }),
+    }));
     const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
       diagnostics.some((item) => item.severity === 'error');
     const action = mode === 'assemble' ? 'Assembly' : 'Execution';
@@ -106,14 +116,23 @@ export function createToolHandlers(deps: ToolDependencies) {
     },
     debugStart: async (input: DebugStartInput): Promise<ToolResult> => {
       if (!deps.bridgeJar || !deps.bridgeToken) throw new Error('Stateful RARS bridge is not configured');
-      const files = await Promise.all(input.files.map((file) => deps.workspace.resolve(file)));
-      const backend = await HeadlessSession.create({
-        javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
-        token: deps.bridgeToken, files,
-        ...(input.programArgs === undefined ? {} : { programArgs: input.programArgs }),
-        ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
-        timeoutMs: deps.timeoutMs,
-      });
+      const source = input.source === undefined ? undefined : await prepareSource(input.source);
+      const files = source?.files ?? await Promise.all(input.files!.map((file) => deps.workspace.resolve(file)));
+      let backend;
+      try {
+        backend = await HeadlessSession.create({
+          javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
+          token: deps.bridgeToken, files,
+          ...(input.programArgs === undefined ? {} : { programArgs: input.programArgs }),
+          ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
+          timeoutMs: deps.timeoutMs,
+        });
+      } catch (error) {
+        await source?.cleanup();
+        if (source !== undefined && error instanceof Error) error.message = source.remapText(error.message);
+        throw error;
+      }
+      if (source !== undefined) backend = withPreparedSource(backend, source);
       const sessionId = deps.sessions.add(backend);
       return { content: [{ type: 'text', text: `Started RARS debug session ${sessionId}` }], structuredContent: { sessionId, ...(await backend.summary()) } };
     },

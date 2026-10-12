@@ -61,6 +61,10 @@ outside them is refused. Folders come from, in order:
     "instructionCount": 22 }
   ```
 
+`rars_assemble`, `rars_run`, and `rars_debug_start` accept `source` instead of `files` for
+throwaway programs. Pass a string for one `inline.s` file, or an array such as
+`[{ "name": "main.s", "text": "..." }, { "name": "lib.s", "text": "..." }]` for several files.
+
 Both accept `dump`, which writes a memory image with RARS's own dumper:
 
 ```json

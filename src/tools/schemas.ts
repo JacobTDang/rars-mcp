@@ -6,13 +6,45 @@ export const dumpSchema = z.object({
   file: z.string().min(1),
 });
 
-export const assembleSchema = z.object({
-  files: z.array(z.string().min(1)).min(1),
-  dump: z.array(dumpSchema).optional(),
+const sourceFileSchema = z.object({
+  name: z.string().min(1).refine(
+    (name) => name !== '.' && !name.includes('..') && !name.includes('/') && !name.includes('\\'),
+    'source name must be a bare file name without path separators or ..',
+  ),
+  text: z.string(),
 });
+const sourceFilesSchema = z.array(sourceFileSchema).min(1).superRefine((files, context) => {
+  const names = new Set<string>();
+  files.forEach(({ name }, index) => {
+    if (names.has(name)) {
+      context.addIssue({ code: 'custom', path: [index, 'name'], message: 'source names must be unique' });
+    }
+    names.add(name);
+  });
+});
+const sourceSchema = z.union([z.string(), sourceFilesSchema]);
+const sourceSelection = {
+  files: z.array(z.string().min(1)).min(1).optional(),
+  source: sourceSchema.optional(),
+};
+const validateSourceSelection = (
+  input: { files?: string[] | undefined; source?: z.infer<typeof sourceSchema> | undefined },
+  context: z.RefinementCtx,
+) => {
+  if (input.files !== undefined && input.source !== undefined) {
+    context.addIssue({ code: 'custom', message: 'files and source are mutually exclusive' });
+  } else if (input.files === undefined && input.source === undefined) {
+    context.addIssue({ code: 'custom', message: 'Either files or source is required' });
+  }
+};
+
+export const assembleSchema = z.object({
+  ...sourceSelection,
+  dump: z.array(dumpSchema).optional(),
+}).superRefine(validateSourceSelection);
 
 export const runSchema = z.object({
-  files: z.array(z.string().min(1)).min(1),
+  ...sourceSelection,
   stdin: z.string().optional(),
   programArgs: z.array(z.string()).optional(),
   maxSteps: z.number().int().positive().optional(),
@@ -21,15 +53,15 @@ export const runSchema = z.object({
   memoryRanges: z.array(z.string()).optional(),
   timeoutMs: z.number().int().positive().optional(),
   dump: z.array(dumpSchema).optional(),
-});
+}).superRefine(validateSourceSelection);
 
 export const closeSessionSchema = z.object({ sessionId: z.string().uuid() });
 export const emptySchema = z.object({});
 export const debugStartSchema = z.object({
-  files: z.array(z.string().min(1)).min(1),
+  ...sourceSelection,
   programArgs: z.array(z.string()).optional(),
   stdin: z.string().optional(),
-});
+}).superRefine(validateSourceSelection);
 const executionActions = ['step', 'backstep', 'continue', 'pause', 'reset', 'terminate'] as const;
 const breakpointActions = ['breakpoint_add', 'breakpoint_remove'] as const;
 export const isBreakpointAction = (action: string): action is typeof breakpointActions[number] =>
