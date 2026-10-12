@@ -2,6 +2,7 @@ import type { AppConfig } from './config.js';
 import { runRars } from './rars/cli.js';
 import { SessionStore } from './sessions/store.js';
 import type { ToolDependencies } from './tools/handlers.js';
+import { createNvcSimulator } from './vhdl/nvc.js';
 import { Workspace } from './workspace.js';
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -21,5 +22,6 @@ export async function createToolDependencies(config: AppConfig, env: Environment
     bridgeHost: config.bridgeHost,
     liveDiscoveryDir: config.liveDiscoveryDir,
     tclshExecutable: env.TCLSH ?? 'tclsh',
+    vhdl: createNvcSimulator({ executable: config.vhdlSimulator }),
   };
 }

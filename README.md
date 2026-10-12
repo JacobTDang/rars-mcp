@@ -4,7 +4,8 @@ RARS MCP gives Claude Code, Codex, Antigravity and other MCP clients access to t
 [RARS](https://github.com/TheThirdOne/rars) RISC-V assembler and simulator: assemble and run
 programs, step through them in a real debugger, read registers and memory, list symbols and
 assembled instructions, write memory images for hardware simulation, and drive a visible RARS
-desktop session.
+desktop session. It also compiles and runs VHDL testbenches with
+[nvc](https://www.nickg.me.uk/nvc/).
 
 ![rars-mcp demo](docs/media/rars-mcp.gif)
 
@@ -145,6 +146,33 @@ program. For file-backed dumps, the target folder must already exist.
 
 ### VHDL
 
+`vhdl_compile` and `vhdl_run` run nvc, which is installed separately (`brew install nvc` on macOS)
+and is not in the Docker image; set `VHDL_SIMULATOR` if it is not on `PATH`. They build the design
+library in a temporary folder that is removed after each call, so only a requested wave file is
+written to the workspace, and they share the wall-clock and output limits of a RARS run.
+
+- **`vhdl_compile`** — analyse VHDL files in the given order and return diagnostics with file, line
+  and column. Options: `std` (`93`, `02`, `08` or `19`; `08` by default, `02` matches Questa's
+  default) and `work`, the library name (`work` by default).
+- **`vhdl_run`** — analyse the files, elaborate `testbench` and run it. Options: `std`, `work`,
+  `stopTime` (such as `"1 us"`), `generics` (such as `{ "WIDTH": "8" }`) and `wave`. Every `report`
+  and assertion comes back with its simulation time and source location:
+
+  ```json
+  { "ok": false, "exitCode": 1,
+    "messages": [{ "time": "20ns", "severity": "error", "text": "count is 5, expected 4",
+                   "source": { "file": "/project/failing_tb.vhd", "line": 12, "column": 12 } }] }
+  ```
+
+  - An assertion of severity `error` or `failure` stops the run and sets `ok` to `false`. A runtime
+    error found by the simulator, such as an index out of range, has severity `fatal`.
+  - A component with no matching entity is left unbound and its instances do nothing, so the
+    testbench can pass without testing anything. `vhdl_run` reports each one as a `warning`
+    diagnostic.
+  - Without `stopTime` the run lasts until no events remain, or until the wall-clock limit.
+  - `wave: { "file": "waves/tb.vcd" }` writes a waveform of the run. `format` is `vcd`, which
+    `wave_query` reads, or `fst`, the default for a file ending in `.fst`. The target folder must
+    already exist.
 - **`wave_query`** — read signal values from a VCD waveform at chosen times, so a check like "is
   `s_ovfl` 1 at 20 ns?" needs no waveform viewer. Signals are hierarchical names such as
   `tb_alu.s_ovfl` or `tb_alu/dut/s_sum`, matched ignoring case. Times look like `20 ns`, `1.5us`,
@@ -217,6 +245,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads |
 | `JAVA_EXECUTABLE` | `java` | Java binary to run |
 | `TCLSH` | `tclsh` | Tcl shell `do_file_check` runs scripts with |
+| `VHDL_SIMULATOR` | `nvc` | nvc executable used by the VHDL tools |
 | `PORT` | `3000` | HTTP entry point port |
 | `RARS_MCP_URL` | `http://127.0.0.1:3000/mcp` | Server the stdio proxy forwards to |
 
@@ -231,6 +260,8 @@ RARS_JAR="$PWD/.cache/rars1_6.jar" npm run test:run   # vitest once; RARS-backed
 scripts/test-java-bridge.sh                    # Java bridge self-tests
 npm run build
 ```
+
+The VHDL tests run only when `nvc`, or the executable in `VHDL_SIMULATOR`, is available.
 
 `npm run start:stdio` runs the stdio entry point, `npm run start:http` the HTTP server, and
 `npm run start:proxy` the proxy used inside Docker.
