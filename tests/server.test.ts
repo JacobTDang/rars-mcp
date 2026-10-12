@@ -113,6 +113,35 @@ describe('MCP server', () => {
     }
   });
 
+  it('publishes rars_encode with a bounded list of instructions', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const tool = (await connection.client.listTools()).tools.find((item) => item.name === 'rars_encode');
+    expect(tool?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: { instructions: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'string' } } },
+      required: ['instructions'],
+    });
+  });
+
+  it('rejects an empty, oversized or multi-line instruction list', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const cases: Array<[string[], string]> = [
+      [[], '1'],
+      [Array<string>(201).fill('nop'), '200'],
+      [['nop', 'nop\nnop'], 'An instruction must fit on one line'],
+      [['nop', ''], 'An instruction cannot be empty'],
+    ];
+    for (const [instructions, message] of cases) {
+      const result = await connection.client.callTool({ name: 'rars_encode', arguments: { instructions } });
+      expect(result.isError, JSON.stringify(instructions)).toBe(true);
+      expect(JSON.stringify(result.content), JSON.stringify(instructions)).toContain(message);
+    }
+  });
+
   it('requires an address for breakpoint actions', async () => {
     const connection = await connect();
     close = connection.close;

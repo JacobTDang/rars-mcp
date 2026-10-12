@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createDoFileCheckHandler, doFileCheckSchema } from './tools/dofile.js';
+import { createEncodeHandler, encodeSchema } from './tools/encode.js';
 import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
@@ -57,6 +58,9 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('rars_modify', {
     description: 'Write registers or bounded memory in a RARS session.', inputSchema: modifySchema,
   }, handlers.modify);
+  server.registerTool('rars_encode', {
+    description: 'Encode RISC-V instructions with RARS: each word in hex with its format (R, R4, I, S, B, U, J) and fields.', inputSchema: encodeSchema,
+  }, createEncodeHandler(dependencies));
   server.registerTool('rars_live_connect', {
     description: 'Discover and authenticate with the visible MCP-enabled RARS desktop session.', inputSchema: liveConnectSchema,
   }, handlers.liveConnect);

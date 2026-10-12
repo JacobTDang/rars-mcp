@@ -341,6 +341,12 @@ public final class RarsSimulator {
         return result;
     }
 
+    // Assembling resets RARS's global symbol table and program counter, which a loaded program depends on.
+    public synchronized List<Map<String, Object>> encode(List<String> instructions) throws Exception {
+        if (program != null) throw new IllegalStateException("Encoding needs a bridge with no program loaded");
+        return InstructionEncoder.encode(instructions);
+    }
+
     public synchronized Object readMemory(int address, int width) throws Exception {
         ensureLoaded();
         switch (width) {
@@ -384,6 +390,10 @@ public final class RarsSimulator {
     }
 
     private RISCVprogram code() throws Exception {
+        return code(program);
+    }
+
+    static RISCVprogram code(Program program) throws Exception {
         Field codeField = Program.class.getDeclaredField("code");
         codeField.setAccessible(true);
         return (RISCVprogram) codeField.get(program);

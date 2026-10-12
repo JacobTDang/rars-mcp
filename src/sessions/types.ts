@@ -47,6 +47,18 @@ export interface ModifyRequest {
   memory?: ReadonlyArray<{ address: string; value: string; width: 1 | 2 | 4 | 8 }>;
 }
 
+// One instruction word with its fields as numbers; imm is put back together from the pieces S, B and J split it into.
+export interface EncodedWord {
+  hex: string;
+  format: 'R' | 'R4' | 'I' | 'S' | 'B' | 'U' | 'J';
+  fields: Readonly<Record<string, number>>;
+}
+
+// An instruction's basic forms and words, one of each per basic instruction it expands to, or why RARS refused it.
+export type EncodedInstruction =
+  | { source: string; basic: string[]; words: EncodedWord[] }
+  | { source: string; error: string };
+
 export interface SessionBackend {
   summary(): Promise<SessionSummary>;
   command(command: DebugCommand): Promise<MachineState>;

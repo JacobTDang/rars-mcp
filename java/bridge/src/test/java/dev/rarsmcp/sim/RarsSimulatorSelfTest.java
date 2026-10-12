@@ -1,11 +1,16 @@
 package dev.rarsmcp.sim;
 
+import rars.Globals;
+import rars.riscv.BasicInstruction;
+import rars.riscv.Instruction;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -126,7 +131,81 @@ public final class RarsSimulatorSelfTest {
         simulator.runUntilStop(1000);
         List<String> tail = addresses(simulator.instructionsAround("pc", 10));
         require(tail.size() == 10 && tail.get(0).equals("0x004003c0") && tail.get(9).equals("0x004003e4"), "last 10 instructions after running off the end");
+        requireThrows(IllegalStateException.class, () -> simulator.encode(Arrays.asList("nop")),
+                "Encoding needs a bridge with no program loaded", "encode with a program loaded");
+
+        encode();
         System.out.println("RarsSimulatorSelfTest PASS");
+    }
+
+    private static void encode() throws Exception {
+        List<String> sources = Arrays.asList(
+                "sub x5, x6, x7", "addi t0, a6, 8", "lw t2, 64(t0)", "sw t2, -4(sp)", "beq x1, x2, 8", "lui t0, 0xfeed2",
+                "jal ra, 16", "slli t0, t0, 12", "li t1, 0xFEED2050", "addi t0, t0", "bne t0, t1, -8", "srai t0, t0, 3",
+                "fmadd.s f1, f2, f3, f4", "loop: addi t0, t0, 1", "bnez t0, loop", "beq x1, x2, 8192", "beq x1, x2, 3",
+                "done:", ".data", "ecall");
+        List<Map<String, Object>> encoded = new RarsSimulator().encode(sources);
+        require(encoded.size() == sources.size(), "one result per instruction");
+        for (int index = 0; index < sources.size(); index++) require(sources.get(index).equals(encoded.get(index).get("source")), "source " + index);
+
+        requireWord(encoded.get(0), 0, "0x407302b3", "R", "opcode", 0x33, "rd", 5, "funct3", 0, "rs1", 6, "rs2", 7, "funct7", 0x20);
+        require(Arrays.asList("sub x5,x6,x7").equals(encoded.get(0).get("basic")), "basic form " + encoded.get(0).get("basic"));
+        requireWord(encoded.get(1), 0, "0x00880293", "I", "opcode", 0x13, "rd", 5, "funct3", 0, "rs1", 16, "imm", 8);
+        requireWord(encoded.get(2), 0, "0x0402a383", "I", "opcode", 0x03, "rd", 7, "funct3", 2, "rs1", 5, "imm", 64);
+        requireWord(encoded.get(3), 0, "0xfe712e23", "S", "opcode", 0x23, "funct3", 2, "rs1", 2, "rs2", 7, "imm", -4);
+        requireWord(encoded.get(4), 0, "0x00208463", "B", "opcode", 0x63, "funct3", 0, "rs1", 1, "rs2", 2, "imm", 8);
+        requireWord(encoded.get(5), 0, "0xfeed22b7", "U", "opcode", 0x37, "rd", 5, "imm", 0xfeed2);
+        requireWord(encoded.get(6), 0, "0x010000ef", "J", "opcode", 0x6f, "rd", 1, "imm", 16);
+        requireWord(encoded.get(7), 0, "0x00c29293", "I", "opcode", 0x13, "rd", 5, "funct3", 1, "rs1", 5, "shamt", 12, "funct7", 0);
+        // A pseudo-instruction: one word per basic instruction it expands to.
+        requireWord(encoded.get(8), 0, "0xfeed2337", "U", "opcode", 0x37, "rd", 6, "imm", 0xfeed2);
+        requireWord(encoded.get(8), 1, "0x05030313", "I", "opcode", 0x13, "rd", 6, "funct3", 0, "rs1", 6, "imm", 0x50);
+        List<?> liBasic = (List<?>) encoded.get(8).get("basic");
+        require(liBasic.size() == 2 && String.valueOf(liBasic.get(0)).startsWith("lui") && String.valueOf(liBasic.get(1)).startsWith("addi"), "pseudo basic forms " + liBasic);
+        requireError(encoded.get(9), "Too few or incorrectly formatted operands");
+        requireWord(encoded.get(10), 0, "0xfe629ce3", "B", "opcode", 0x63, "funct3", 1, "rs1", 5, "rs2", 6, "imm", -8);
+        requireWord(encoded.get(11), 0, "0x4032d293", "I", "opcode", 0x13, "rd", 5, "funct3", 5, "rs1", 5, "shamt", 3, "funct7", 0x20);
+        requireWord(encoded.get(12), 0, "0x203170c3", "R4", "opcode", 0x43, "rd", 1, "funct3", 7, "rs1", 2, "rs2", 3, "funct2", 0, "rs3", 4);
+        requireWord(encoded.get(13), 0, "0x00128293", "I", "opcode", 0x13, "rd", 5, "funct3", 0, "rs1", 5, "imm", 1);
+        // Labels work across instructions, laid out one after another as in a program.
+        requireWord(encoded.get(14), 0, "0xfe029ee3", "B", "opcode", 0x63, "funct3", 1, "rs1", 5, "rs2", 0, "imm", -4);
+        requireError(encoded.get(15), "Branch target word address beyond 12-bit range");
+        requireError(encoded.get(16), "Branch and jump offsets must be even, not 3");
+        requireError(encoded.get(17), "Not an instruction");
+        requireError(encoded.get(18), "Not an instruction");
+        requireWord(encoded.get(19), 0, "0x00000073", "I", "opcode", 0x73, "rd", 0, "funct3", 0, "rs1", 0, "imm", 0);
+
+        // A backward jump from the first instruction targets an address below the text segment.
+        requireWord(new RarsSimulator().encode(Arrays.asList("jal x0, -2048")).get(0), 0, "0x801ff06f", "J", "opcode", 0x6f, "rd", 0, "imm", -2048);
+        requireError(new RarsSimulator().encode(Arrays.asList("nope x1")).get(0), "\"nope\" is not a recognized operator");
+
+        String countMessage = "Between 1 and 200 instructions are needed";
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.emptyList()), countMessage, "no instructions");
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.nCopies(201, "nop")), countMessage, "too many instructions");
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Arrays.asList("nop", "nop\nnop")),
+                "Instruction 2 spans more than one line", "instruction with a line break");
+
+        // Every word RARS can assemble has an opcode the decoder knows.
+        for (Instruction instruction : Globals.instructionSet.getInstructionList()) {
+            if (instruction instanceof BasicInstruction) InstructionDecoder.decode(((BasicInstruction) instruction).getOpcodeMatch());
+        }
+        requireThrows(IllegalArgumentException.class, () -> InstructionDecoder.decode(0x0000007f),
+                "No known format for opcode 0x7f in 0x0000007f", "unknown opcode");
+    }
+
+    private static void requireWord(Map<String, Object> entry, int index, String hex, String format, Object... fields) {
+        String name = entry.get("source") + " word " + index;
+        require(!entry.containsKey("error"), name + ": " + entry.get("error"));
+        Map<?, ?> word = (Map<?, ?>) ((List<?>) entry.get("words")).get(index);
+        require(hex.equals(word.get("hex")), name + " hex " + word.get("hex"));
+        require(format.equals(word.get("format")), name + " format " + word.get("format"));
+        Map<String, Object> expected = new LinkedHashMap<>();
+        for (int field = 0; field < fields.length; field += 2) expected.put((String) fields[field], fields[field + 1]);
+        require(new ArrayList<>(expected.entrySet()).equals(new ArrayList<>(((Map<?, ?>) word.get("fields")).entrySet())), name + " fields " + word.get("fields"));
+    }
+
+    private static void requireError(Map<String, Object> entry, String message) {
+        require(!entry.containsKey("words") && String.valueOf(entry.get("error")).contains(message), entry.get("source") + " error " + entry.get("error"));
     }
 
     private static void requireSymbol(List<Map<String, Object>> symbols, String name, String type, boolean global, Long address) {
