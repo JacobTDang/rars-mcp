@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/server';
 
+import { createDoFileCheckHandler, doFileCheckSchema } from './tools/dofile.js';
 import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
@@ -65,6 +66,10 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('wave_query', {
     description: 'Read signal values at given times from a VCD waveform file in the workspace.', inputSchema: waveQuerySchema,
   }, createWaveQuery(dependencies));
+  server.registerTool('do_file_check', {
+    description: 'Dry-run a Questa or ModelSim .do script with stubbed commands: what it compiles, in what order, and which files are missing.',
+    inputSchema: doFileCheckSchema,
+  }, createDoFileCheckHandler(dependencies));
   // A client that advertises roots tells us which folders it is working in, so the
   // workspace follows the client instead of the folder this server started in.
   server.server.oninitialized = () => {

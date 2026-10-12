@@ -20,5 +20,6 @@ export async function createToolDependencies(config: AppConfig, env: Environment
     bridgeToken: env.RARS_HEADLESS_BRIDGE_TOKEN ?? 'internal-headless-bridge',
     bridgeHost: config.bridgeHost,
     liveDiscoveryDir: config.liveDiscoveryDir,
+    tclshExecutable: env.TCLSH ?? 'tclsh',
   };
 }
