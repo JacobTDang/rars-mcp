@@ -137,6 +137,17 @@ program. For file-backed dumps, the target folder must already exist.
   that lists the signals sharing its last name. nvc writes VCD with `--wave=tb.vcd --format=vcd`
   and GHDL with `--vcd=tb.vcd`; FST and GHW files, and files over `WAVE_MAX_BYTES`, are refused.
 
+- **`do_file_check`** — dry-run a Questa or ModelSim `.do` script without a simulator. Returns
+  the files it compiles, in order, with each one's library, VHDL standard and whether it exists,
+  plus the `vlib` libraries, the `vsim` top and any Tcl error with its file and line. `std` sets
+  the standard for `vcom` calls that name none.
+
+`do_file_check` runs the script with `tclsh` 8.5 or later, which the Docker image does not
+include. `vlib`, `vmap`, `vcom`, `vlog`, `vsim`, `run`, `add wave` and the other common Questa
+commands are stubs that record their calls. The script has no shell or file access: nested `do`
+files and `file exists` are answered from the workspace. Relative paths resolve from the script's
+folder, as if Questa ran it there.
+
 ## Run in Docker
 
 Requirements: Docker Desktop with Compose.
@@ -182,6 +193,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes |
 | `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads |
 | `JAVA_EXECUTABLE` | `java` | Java binary to run |
+| `TCLSH` | `tclsh` | Tcl shell `do_file_check` runs scripts with |
 | `PORT` | `3000` | HTTP entry point port |
 | `RARS_MCP_URL` | `http://127.0.0.1:3000/mcp` | Server the stdio proxy forwards to |
 

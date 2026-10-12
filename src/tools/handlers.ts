@@ -25,6 +25,7 @@ export interface ToolDependencies {
   bridgeToken?: string;
   bridgeHost?: string;
   liveDiscoveryDir?: string;
+  tclshExecutable?: string;
 }
 
 export type ToolResult = CallToolResult;
