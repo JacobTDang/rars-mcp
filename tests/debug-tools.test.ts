@@ -24,6 +24,9 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     expect(sessionId).toBeTruthy();
     await handlers.modify({ sessionId, registers: { a0: '41' } });
     expect((await handlers.inspect({ sessionId, registers: ['a0'] })).structuredContent).toMatchObject({ registers: { a0: { hex: '0x00000029', signed: 41 } } });
+    expect((await handlers.inspect({ sessionId, instructions: { around: 'main', count: 2 } })).structuredContent)
+      .toMatchObject({ instructions: [{ address: '0x00400000', source: 'li a0, 1' }, { address: '0x00400004' }] });
+    await expect(handlers.inspect({ sessionId, instructions: { from: 'main' } })).rejects.toThrow('instructions takes around and count, or both from and to');
     await handlers.debugCommand({ sessionId, action: 'step' });
     await handlers.debugCommand({ sessionId, action: 'backstep' });
     await handlers.sessionClose({ sessionId });

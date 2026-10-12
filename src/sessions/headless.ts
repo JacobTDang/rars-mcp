@@ -91,6 +91,7 @@ export class HeadlessSession implements SessionBackend {
       memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
       includeSymbols: request.includeSymbols ?? false,
       includeInstructions: request.includeInstructions ?? false,
+      ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
     });
   }
 

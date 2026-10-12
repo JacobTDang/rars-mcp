@@ -30,11 +30,16 @@ export type DebugCommand =
   | { action: 'continue'; maxSteps?: number }
   | { action: 'breakpoint_add' | 'breakpoint_remove'; address: string };
 
+// count instructions centred on around (the program counter by default), or every instruction
+// from one location to another. A location is pc, a code label, an address, or file:line.
+export type InstructionWindow = { around?: string; count?: number } | { from: string; to: string };
+
 export interface InspectRequest {
   registers?: string[];
   memory?: ReadonlyArray<{ address: string; length: number }>;
   includeSymbols?: boolean;
   includeInstructions?: boolean;
+  instructions?: InstructionWindow;
 }
 
 export interface ModifyRequest {
