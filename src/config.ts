@@ -15,6 +15,7 @@ export interface AppConfig {
   bridgeHost: string;
   bridgeJar: string;
   liveDiscoveryDir: string;
+  vhdlSimulator: string;
   bridgeToken?: string;
 }
 
@@ -77,6 +78,7 @@ export function loadConfig(env: Environment = process.env): AppConfig {
     bridgeHost: env.RARS_BRIDGE_HOST ?? '127.0.0.1',
     bridgeJar: resolve(env.RARS_BRIDGE_JAR ?? join(root, 'java', 'bridge', 'build', 'rars-mcp-bridge.jar')),
     liveDiscoveryDir: resolve(env.RARS_LIVE_DISCOVERY_DIR ?? join(root, '.runtime')),
+    vhdlSimulator: env.VHDL_SIMULATOR ?? 'nvc',
     ...(bridgeToken === undefined ? {} : { bridgeToken }),
   };
 }

@@ -4,6 +4,7 @@ import { parseDiagnostics } from '../rars/diagnostics.js';
 import { extractDumps, extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand, InstructionWindow } from '../sessions/types.js';
+import type { VhdlSimulator } from '../vhdl/simulator.js';
 import type { Workspace } from '../workspace.js';
 import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
@@ -26,6 +27,7 @@ export interface ToolDependencies {
   bridgeHost?: string;
   liveDiscoveryDir?: string;
   tclshExecutable?: string;
+  vhdl?: VhdlSimulator;
 }
 
 export type ToolResult = CallToolResult;

@@ -7,6 +7,7 @@ import { createEncodeHandler, encodeSchema } from './tools/encode.js';
 import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
+import { createVhdlHandlers, vhdlCompileSchema, vhdlRunSchema } from './tools/vhdl.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
 import { createWaveQuery, waveQuerySchema } from './tools/wave.js';
 
@@ -74,6 +75,14 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Dry-run a Questa or ModelSim .do script with stubbed commands: what it compiles, in what order, and which files are missing.',
     inputSchema: doFileCheckSchema,
   }, createDoFileCheckHandler(dependencies));
+  const vhdl = createVhdlHandlers(dependencies);
+  server.registerTool('vhdl_compile', {
+    description: 'Analyse VHDL files with nvc and return diagnostics with file, line and column.', inputSchema: vhdlCompileSchema,
+  }, vhdl.compile);
+  server.registerTool('vhdl_run', {
+    description: 'Analyse, elaborate and run a VHDL testbench with nvc; returns each report and assertion with its simulation time.',
+    inputSchema: vhdlRunSchema,
+  }, vhdl.run);
   // A client that advertises roots tells us which folders it is working in, so the
   // workspace follows the client instead of the folder this server started in.
   server.server.oninitialized = () => {
