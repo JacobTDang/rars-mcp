@@ -29,7 +29,7 @@ describe('MCP server', () => {
 
     const names = (await connection.client.listTools()).tools.map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining([
-      'rars_assemble', 'rars_run', 'rars_session_list', 'rars_session_close',
+      'rars_assemble', 'rars_run', 'rars_session_list', 'rars_session_close', 'rars_status',
     ]));
   });
 

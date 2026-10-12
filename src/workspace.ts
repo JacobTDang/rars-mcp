@@ -44,6 +44,11 @@ export class Workspace {
     this.provided = undefined;
   }
 
+  // The client's roots after symlinks are resolved; empty when the client advertises none.
+  async clientRoots(): Promise<readonly string[]> {
+    return (await this.providedRoots()).canonical;
+  }
+
   private async providedRoots(): Promise<Roots> {
     if (this.provider === undefined) return { configured: [], canonical: [] };
     this.provided ??= (async (provider: RootsProvider): Promise<Roots> => {

@@ -61,6 +61,10 @@ export class SessionStore {
     this.idleMs = options.idleMs ?? 30 * 60 * 1000;
   }
 
+  get size(): number {
+    return this.sessions.size;
+  }
+
   add(backend: SessionBackend): SessionId {
     const id = randomUUID();
     this.sessions.set(id, new QueuedBackend(backend));

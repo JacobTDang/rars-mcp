@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
+import { createStatusHandler, statusSchema } from './tools/status.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
@@ -33,6 +34,10 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Close an isolated session or disconnect a live RARS session.',
     inputSchema: closeSessionSchema,
   }, handlers.sessionClose);
+  server.registerTool('rars_status', {
+    description: 'Report the RARS and Java versions, bridge, workspace folders, and open sessions without running a program.',
+    inputSchema: statusSchema,
+  }, createStatusHandler(dependencies));
   server.registerTool('rars_debug_start', {
     description: 'Start an isolated stateful RARS debugger session for workspace files.', inputSchema: debugStartSchema,
   }, handlers.debugStart);
