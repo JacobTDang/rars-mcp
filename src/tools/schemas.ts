@@ -52,12 +52,33 @@ export const debugCommandSchema = z.object({
     context.addIssue({ code: 'custom', path: ['address'], message: 'address is only valid for breakpoint_add and breakpoint_remove' });
   }
 });
+const maxInstructionWindow = 200;
+const windowLocation = 'pc, a code label, an address, or file:line';
+// Flat like debugCommandSchema, so every client sees all four fields; the refinement allows one form.
+const instructionWindowSchema = z.strictObject({
+  around: z.string().min(1).describe(`Centre of the window: ${windowLocation}. Defaults to pc`).optional(),
+  count: z.number().int().min(1).max(maxInstructionWindow)
+    .describe(`Instructions in the window around the centre, 10 by default and at most ${maxInstructionWindow}`).optional(),
+  from: z.string().min(1).describe(`Start of an inclusive range, given with to: ${windowLocation}`).optional(),
+  to: z.string().min(1).describe(`End of an inclusive range of at most ${maxInstructionWindow} instructions, given with from`).optional(),
+}).superRefine((window, context) => {
+  const range = window.from !== undefined || window.to !== undefined;
+  if (range && (window.from === undefined || window.to === undefined || window.around !== undefined || window.count !== undefined)) {
+    context.addIssue({ code: 'custom', message: 'instructions takes around and count, or both from and to' });
+  }
+});
 export const inspectSchema = z.object({
   sessionId: z.string().uuid(),
   registers: z.array(z.string()).optional(),
   memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional(),
   includeSymbols: z.boolean().optional(),
-  includeInstructions: z.boolean().optional(),
+  includeInstructions: z.boolean().describe('Deprecated: returns every instruction in the program; use instructions instead').optional(),
+  instructions: instructionWindowSchema
+    .describe('A window of assembled instructions: { around, count } or { from, to }; {} is the 10 around pc').optional(),
+}).superRefine((input, context) => {
+  if (input.includeInstructions === true && input.instructions !== undefined) {
+    context.addIssue({ code: 'custom', path: ['instructions'], message: 'includeInstructions and instructions cannot be combined' });
+  }
 });
 export const modifySchema = z.object({
   sessionId: z.string().uuid(),

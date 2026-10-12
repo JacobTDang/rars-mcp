@@ -114,7 +114,11 @@ public final class BridgeServer {
                 }
                 result.put("memory", memory);
                 if (Boolean.TRUE.equals(payload.get("includeSymbols"))) result.put("symbols", simulator.symbols());
-                if (Boolean.TRUE.equals(payload.get("includeInstructions"))) result.put("instructions", simulator.instructions());
+                Object window = payload.get("instructions");
+                boolean everyInstruction = Boolean.TRUE.equals(payload.get("includeInstructions"));
+                if (everyInstruction && window != null) throw new IllegalArgumentException("includeInstructions and instructions cannot be combined");
+                if (everyInstruction) result.put("instructions", simulator.instructions());
+                if (window != null) result.put("instructions", instructions(window));
                 return BridgeResponse.success(request.id, result);
             }
             case "modify":
@@ -149,6 +153,20 @@ public final class BridgeServer {
             case "terminate": return simulator.terminate();
             default: throw new IllegalArgumentException("Unknown debug action: " + action);
         }
+    }
+
+    // { around, count } or { from, to }; an empty window is the 10 instructions around the program counter.
+    private List<Map<String, Object>> instructions(Object value) throws Exception {
+        if (!(value instanceof Map)) throw new IllegalArgumentException("instructions must be an object");
+        Map<?, ?> window = (Map<?, ?>) value;
+        if (!window.containsKey("from") && !window.containsKey("to")) {
+            return simulator.instructionsAround(window.containsKey("around") ? string(window.get("around")) : "pc",
+                    window.containsKey("count") ? integer(window.get("count")) : 10);
+        }
+        if (!window.containsKey("from") || !window.containsKey("to") || window.containsKey("around") || window.containsKey("count")) {
+            throw new IllegalArgumentException("instructions takes around and count, or both from and to");
+        }
+        return simulator.instructionsBetween(string(window.get("from")), string(window.get("to")));
     }
 
     private static String argument(String[] args, String name) {

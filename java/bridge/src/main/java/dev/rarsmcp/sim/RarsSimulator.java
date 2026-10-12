@@ -35,6 +35,7 @@ import java.util.regex.Pattern;
 public final class RarsSimulator {
     private static final Pattern NUMBER = Pattern.compile("-?(0x[0-9a-fA-F]+|\\d+)");
     private static final Pattern FILE_LINE = Pattern.compile("(.+):(\\d+)");
+    private static final int MAX_INSTRUCTION_WINDOW = 200;
 
     private Program program;
     private Options options;
@@ -254,17 +255,70 @@ public final class RarsSimulator {
     public synchronized List<Map<String, Object>> instructions() throws Exception {
         ensureLoaded();
         List<Map<String, Object>> result = new ArrayList<>();
-        for (ProgramStatement statement : code().getMachineList()) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("address", Words.address(statement.getAddress()));
-            entry.put("code", Words.address(statement.getBinaryStatement()));
-            entry.put("basic", statement.getPrintableBasicAssemblyStatement().trim());
-            entry.put("source", statement.getSource().trim());
-            entry.put("file", statement.getSourceFile());
-            entry.put("line", statement.getSourceLine());
-            result.add(entry);
+        for (ProgramStatement statement : code().getMachineList()) result.add(instruction(statement));
+        return result;
+    }
+
+    // count instructions centred on location, fewer at either end of the program;
+    // an even count puts the extra one after it.
+    public synchronized List<Map<String, Object>> instructionsAround(String location, int count) throws Exception {
+        ensureLoaded();
+        if (count < 1 || count > MAX_INSTRUCTION_WINDOW) {
+            throw new IllegalArgumentException("count must be between 1 and " + MAX_INSTRUCTION_WINDOW);
+        }
+        List<ProgramStatement> statements = statementsByAddress();
+        int address = windowAddress(location);
+        int centre = 0;
+        while (centre < statements.size() && statements.get(centre).getAddress() != address) centre++;
+        if (centre == statements.size()) {
+            String at = NUMBER.matcher(location).matches() ? Words.address(address) : location + " (" + Words.address(address) + ")";
+            throw new IllegalArgumentException("No instruction at " + at);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        int last = Math.min(statements.size() - 1, centre + count / 2);
+        for (int index = Math.max(0, centre - (count - 1) / 2); index <= last; index++) result.add(instruction(statements.get(index)));
+        return result;
+    }
+
+    // Every instruction from one location to another, both included.
+    public synchronized List<Map<String, Object>> instructionsBetween(String from, String to) throws Exception {
+        ensureLoaded();
+        int start = windowAddress(from);
+        int end = windowAddress(to);
+        if (Integer.compareUnsigned(start, end) > 0) throw new IllegalArgumentException(from + " comes after " + to);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ProgramStatement statement : statementsByAddress()) {
+            int address = statement.getAddress();
+            if (Integer.compareUnsigned(address, start) >= 0 && Integer.compareUnsigned(address, end) <= 0) result.add(instruction(statement));
+        }
+        if (result.size() > MAX_INSTRUCTION_WINDOW) {
+            throw new IllegalArgumentException("The range " + from + " to " + to + " holds " + result.size()
+                    + " instructions; the limit is " + MAX_INSTRUCTION_WINDOW);
         }
         return result;
+    }
+
+    // pc, or any location a breakpoint accepts.
+    private int windowAddress(String location) throws Exception {
+        return location.equals("pc") ? RegisterFile.getProgramCounter() : resolveLocation(location);
+    }
+
+    // The machine list follows source order, which need not be address order (.ktext, or .text with an address).
+    private List<ProgramStatement> statementsByAddress() throws Exception {
+        List<ProgramStatement> statements = new ArrayList<>(code().getMachineList());
+        statements.sort((left, right) -> Integer.compareUnsigned(left.getAddress(), right.getAddress()));
+        return statements;
+    }
+
+    private static Map<String, Object> instruction(ProgramStatement statement) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("address", Words.address(statement.getAddress()));
+        entry.put("code", Words.address(statement.getBinaryStatement()));
+        entry.put("basic", statement.getPrintableBasicAssemblyStatement().trim());
+        entry.put("source", statement.getSource().trim());
+        entry.put("file", statement.getSourceFile());
+        entry.put("line", statement.getSourceLine());
+        return entry;
     }
 
     private static void addSymbols(List<Map<String, Object>> result, SymbolTable table, boolean global) {

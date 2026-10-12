@@ -84,8 +84,15 @@ hardware simulation needs. The target folder must already exist.
     `ran_off_end`, `exception` or `terminated`. A program that has terminated refuses to run
     until the session is reset.
 - **`rars_inspect`** — registers (including `pc`) and bounded memory as `{ hex, signed }`, plus
-  `includeSymbols` for the symbol table and `includeInstructions` for the assembled text segment
+  `includeSymbols` for the symbol table and `instructions` for a window of the assembled program
   with each instruction's address, machine code, basic form, source line and file.
+  - `instructions: { around, count }` returns `count` instructions (10 by default, at most 200)
+    centred on `around`: `pc` (the default), a code label, an address, or `file:line`. With an
+    even `count` the extra instruction comes after. `instructions: {}` is the 10 around `pc`.
+  - `instructions: { from, to }` returns every instruction from one location to the other,
+    inclusive, and refuses a range of more than 200.
+  - An unknown label, or an address with no instruction, is an error.
+  - `includeInstructions: true` still returns the whole program, but is deprecated.
 - **`rars_modify`** — write registers or memory.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.

@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { HeadlessSession } from '../src/sessions/headless.js';
@@ -116,6 +118,43 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     expect(state.instructions).toHaveLength(4);
     expect(state.instructions[0]).toMatchObject({ address: '0x00400000', code: '0x00100513', source: 'li a0, 1', line: 5 });
     expect(await session.inspect({})).not.toHaveProperty('instructions');
+    await session.close();
+  });
+
+  it('returns a window of instructions around a location or between two locations', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm'), resolve('tests/fixtures/debug-helper.asm')], timeoutMs: 3_000,
+    });
+    const addresses = async (request: Parameters<HeadlessSession['inspect']>[0]) =>
+      ((await session.inspect(request)) as { instructions: Array<{ address: string }> }).instructions.map((item) => item.address);
+
+    await expect(addresses({ instructions: {} })).resolves.toEqual(['0x00400000', '0x00400004', '0x00400008', '0x0040000c', '0x00400010']);
+    await session.command({ action: 'step' });
+    await expect(addresses({ instructions: { around: 'pc', count: 2 } })).resolves.toEqual(['0x00400004', '0x00400008']);
+    await expect(addresses({ instructions: { around: 'helper', count: 3 } })).resolves.toEqual(['0x0040000c', '0x00400010']);
+    await expect(addresses({ instructions: { from: 'main', to: '0x00400008' } })).resolves.toEqual(['0x00400000', '0x00400004', '0x00400008']);
+    expect(((await session.inspect({ instructions: { around: 'main', count: 1 } })) as { instructions: unknown[] }).instructions[0])
+      .toMatchObject({ address: '0x00400000', code: '0x00100513', source: 'li a0, 1', line: 5 });
+    await expect(session.inspect({ instructions: { around: 'nope' } })).rejects.toThrow('Unknown label: nope');
+    await expect(session.inspect({ includeInstructions: true, instructions: {} }))
+      .rejects.toThrow('includeInstructions and instructions cannot be combined');
+    await session.close();
+  });
+
+  it('refuses an instruction range longer than 200 instructions', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rars-window-'));
+    await writeFile(join(directory, 'long.asm'), `.text\nmain:\n${'  addi t0, t0, 1\n'.repeat(250)}`);
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [join(directory, 'long.asm')], timeoutMs: 3_000,
+    });
+
+    expect(await session.inspect({ instructions: { from: 'main', to: '0x0040031c' } })).toHaveProperty('instructions.length', 200);
+    await expect(session.inspect({ instructions: { from: 'main', to: '0x004003e4' } }))
+      .rejects.toThrow('The range main to 0x004003e4 holds 250 instructions; the limit is 200');
     await session.close();
   });
 

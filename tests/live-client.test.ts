@@ -19,7 +19,7 @@ async function fakeBridge(token: string, mode = 'live') {
         const authenticated = request.command === 'hello' && request.payload.token === token;
         const result = request.command === 'hello'
           ? { protocolVersion: 1, mode }
-          : request.command === 'inspect' ? { status: 'paused', registers: { a0: 7 }, ...(request.payload.includeSymbols ? { symbols: [] } : {}), ...(request.payload.includeInstructions ? { instructions: [] } : {}) }
+          : request.command === 'inspect' ? { status: 'paused', registers: { a0: 7 }, ...(request.payload.includeSymbols ? { symbols: [] } : {}), ...(request.payload.includeInstructions ? { instructions: [] } : {}), ...(request.payload.instructions ? { window: request.payload.instructions } : {}) }
           : { status: 'paused' };
         socket.write(`${JSON.stringify(authenticated || request.command !== 'hello'
           ? { protocolVersion: 1, id: request.id, ok: true, result }
@@ -38,6 +38,7 @@ describe('LiveClient', () => {
     expect(await client.inspect({ registers: ['a0'] })).toMatchObject({ registers: { a0: 7 } });
     expect(await client.inspect({ includeSymbols: true })).toHaveProperty('symbols');
     expect(await client.inspect({ includeInstructions: true })).toHaveProperty('instructions');
+    expect(await client.inspect({ instructions: { from: 'main', to: 'end' } })).toMatchObject({ window: { from: 'main', to: 'end' } });
     await client.command({ action: 'step' });
     await client.close();
     bridge.server.close();

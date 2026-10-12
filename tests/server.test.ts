@@ -84,6 +84,35 @@ describe('MCP server', () => {
     expect(JSON.stringify(result.content)).toContain('maxSteps is only valid for continue');
   });
 
+  it('publishes the instruction window and marks includeInstructions as deprecated', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const tool = (await connection.client.listTools()).tools.find((item) => item.name === 'rars_inspect');
+    const schema = tool?.inputSchema as { properties: Record<string, { type?: string; description?: string; properties?: object }> };
+    expect(schema.properties.instructions).toMatchObject({ type: 'object', properties: { around: {}, count: {}, from: {}, to: {} } });
+    expect(schema.properties.includeInstructions?.description).toMatch(/^Deprecated/);
+  });
+
+  it('rejects an invalid instruction window', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ includeInstructions: true, instructions: {} }, 'includeInstructions and instructions cannot be combined'],
+      [{ instructions: { around: 'main', from: 'main', to: 'end' } }, 'instructions takes around and count, or both from and to'],
+      [{ instructions: { from: 'main' } }, 'instructions takes around and count, or both from and to'],
+      [{ instructions: { count: 201 } }, '200'],
+      [{ instructions: { count: 0 } }, '1'],
+      [{ instructions: { arround: 'pc' } }, 'arround'],
+    ];
+    for (const [input, message] of cases) {
+      const result = await connection.client.callTool({ name: 'rars_inspect', arguments: { sessionId, ...input } });
+      expect(result.isError, JSON.stringify(input)).toBe(true);
+      expect(JSON.stringify(result.content), JSON.stringify(input)).toContain(message);
+    }
+  });
+
   it('requires an address for breakpoint actions', async () => {
     const connection = await connect();
     close = connection.close;

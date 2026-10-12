@@ -1,5 +1,9 @@
 package dev.rarsmcp.sim;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -81,6 +85,40 @@ public final class RarsSimulatorSelfTest {
         require(String.valueOf(first.get("basic")).startsWith("addi"), "first instruction basic " + first.get("basic"));
         require(String.valueOf(first.get("file")).endsWith("debug.asm"), "first instruction file");
         require(String.valueOf(instructions.get(instructions.size() - 1).get("file")).endsWith("debug-helper.asm"), "second file instructions");
+
+        List<String> program = Arrays.asList("0x00400000", "0x00400004", "0x00400008", "0x0040000c", "0x00400010");
+        require(addresses(simulator.instructionsAround("pc", 10)).equals(program), "window around pc stops at the program's ends");
+        require(addresses(simulator.instructionsAround("0x00400008", 3)).equals(program.subList(1, 4)), "odd window");
+        require(addresses(simulator.instructionsAround("0x00400008", 4)).equals(program.subList(1, 5)), "even window puts the extra one after");
+        require(addresses(simulator.instructionsAround("helper", 1)).equals(program.subList(4, 5)), "window around a label");
+        require(simulator.instructionsAround("main", 1).get(0).equals(first), "window keeps the instruction shape");
+        simulator.step();
+        require(addresses(simulator.instructionsAround("pc", 1)).equals(program.subList(1, 2)), "window follows pc");
+        require(addresses(simulator.instructionsBetween("main", "0x00400008")).equals(program.subList(0, 3)), "inclusive range");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("nope", 3), "Unknown label: nope", "window around an unknown label");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "nope"), "Unknown label: nope", "range to an unknown label");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("0x10010000", 3), "No instruction at 0x10010000", "window around data");
+        String countMessage = "count must be between 1 and 200";
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 0), countMessage, "empty window");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 201), countMessage, "window over the limit");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("0x00400008", "main"), "0x00400008 comes after main", "backwards range");
+
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        simulator.runUntilStop(1000);
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 10), "No instruction at pc (0x00400010)", "window after exit");
+
+        // Longer than the window limit, with a label in the middle.
+        Path longProgram = Files.createTempFile("rars-window", ".asm");
+        longProgram.toFile().deleteOnExit();
+        StringBuilder source = new StringBuilder(".text\nmain:\n");
+        for (int index = 0; index < 250; index++) source.append(index == 125 ? "middle:\n" : "").append("  addi t0, t0, 1\n");
+        Files.write(longProgram, source.toString().getBytes(StandardCharsets.UTF_8));
+        simulator.load(Arrays.asList(longProgram.toString()), Collections.emptyList(), "");
+        List<String> middle = addresses(simulator.instructionsAround("middle", 200));
+        require(middle.size() == 200 && middle.get(0).equals("0x00400068") && middle.get(199).equals("0x00400384"), "full window around a label");
+        require(simulator.instructionsBetween("main", "0x0040031c").size() == 200, "range at the limit");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "0x004003e4"),
+                "The range main to 0x004003e4 holds 250 instructions; the limit is 200", "range over the limit");
         System.out.println("RarsSimulatorSelfTest PASS");
     }
 
@@ -93,6 +131,12 @@ public final class RarsSimulatorSelfTest {
             return;
         }
         throw new AssertionError("missing symbol " + name);
+    }
+
+    private static List<String> addresses(List<Map<String, Object>> instructions) {
+        List<String> result = new ArrayList<>();
+        for (Map<String, Object> instruction : instructions) result.add((String) instruction.get("address"));
+        return result;
     }
 
     private interface Action { void run() throws Exception; }

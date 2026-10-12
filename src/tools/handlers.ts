@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
 import { extractDumps, extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
-import type { DebugCommand } from '../sessions/types.js';
+import type { DebugCommand, InstructionWindow } from '../sessions/types.js';
 import type { Workspace } from '../workspace.js';
 import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
@@ -138,6 +138,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(request.memory === undefined ? {} : { memory: request.memory }),
         ...(request.includeSymbols === undefined ? {} : { includeSymbols: request.includeSymbols }),
         ...(request.includeInstructions === undefined ? {} : { includeInstructions: request.includeInstructions }),
+        ...(request.instructions === undefined ? {} : { instructions: instructionWindow(request.instructions) }),
       });
       return { content: [{ type: 'text', text: `Inspected RARS session ${sessionId}` }], structuredContent: result as Record<string, unknown> };
     },
@@ -175,6 +176,17 @@ export function createToolHandlers(deps: ToolDependencies) {
       return { content: [{ type: 'text', text: `Applied ${command.action} to visible RARS session ${input.sessionId}` }], structuredContent: result as Record<string, unknown> };
     },
   };
+}
+
+// The schema keeps the window one flat object; this checks it again for a direct handler call.
+function instructionWindow({ around, count, from, to }: NonNullable<InspectInput['instructions']>): InstructionWindow {
+  if (from === undefined && to === undefined) {
+    return { ...(around === undefined ? {} : { around }), ...(count === undefined ? {} : { count }) };
+  }
+  if (from === undefined || to === undefined || around !== undefined || count !== undefined) {
+    throw new Error('instructions takes around and count, or both from and to');
+  }
+  return { from, to };
 }
 
 export type ToolHandlers = ReturnType<typeof createToolHandlers>;
