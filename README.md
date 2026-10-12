@@ -63,6 +63,12 @@ outside them is refused. Folders come from, in order:
     "memory": [{ "address": "0x10010000", "hex": "0x6c6c6568", "signed": 1819043176 }],
     "instructionCount": 22 }
   ```
+- **`rars_eval`** — expected results for up to 1024 RV32I/M ALU cases, such as
+  `{ "op": "slt", "rs1": "0xFFFFFFFB", "rs2": "0x7FFFFFFF" }`, with `imm` in place of `rs2` for
+  `addi`, `slti`, `sltiu`, `xori`, `ori`, `andi`, `slli`, `srli`, `srai`. The cases run in one generated
+  program, and each comes back with `rd` as `hex`, `signed` and `unsigned` plus a `zero` flag.
+  `format: "vhdl"` also returns a constant table to paste into a testbench. It reads the results
+  through a label dump, so it requires the bridge.
 
 `rars_assemble`, `rars_run`, and `rars_debug_start` accept `source` instead of `files` for
 throwaway programs. Pass a string for one `inline.s` file, or an array such as
