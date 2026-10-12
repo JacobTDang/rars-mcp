@@ -120,6 +120,23 @@ program. For file-backed dumps, the target folder must already exist.
 
 - **`rars_live_connect`**, **`rars_live_command`** — drive the RARS application you can see.
 
+### VHDL
+
+- **`wave_query`** — read signal values from a VCD waveform at chosen times, so a check like "is
+  `s_ovfl` 1 at 20 ns?" needs no waveform viewer. Signals are hierarchical names such as
+  `tb_alu.s_ovfl` or `tb_alu/dut/s_sum`, matched ignoring case. Times look like `20 ns`, `1.5us`,
+  or a bare `100` in the file's timescale units. Each value is the last change at or before that
+  time, and a time before the first dump reads as `x`:
+
+  ```json
+  { "time": "20 ns", "tb_alu.s_sum": { "bits": "0111", "hex": "0x7", "unsigned": 7, "signed": 7 },
+    "tb_alu.s_ratio": { "real": -2 }, "tb_alu.s_phase": { "string": "check" } }
+  ```
+
+  `hex`, `unsigned` and `signed` are `null` when a bit is not 0 or 1. An unknown signal is an error
+  that lists the signals sharing its last name. nvc writes VCD with `--wave=tb.vcd --format=vcd`
+  and GHDL with `--vcd=tb.vcd`; FST and GHW files, and files over `WAVE_MAX_BYTES`, are refused.
+
 ## Run in Docker
 
 Requirements: Docker Desktop with Compose.
@@ -163,6 +180,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes |
+| `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads |
 | `JAVA_EXECUTABLE` | `java` | Java binary to run |
 | `PORT` | `3000` | HTTP entry point port |
 | `RARS_MCP_URL` | `http://127.0.0.1:3000/mcp` | Server the stdio proxy forwards to |

@@ -20,6 +20,7 @@ export interface ToolDependencies {
   rarsJar: string;
   timeoutMs: number;
   maxOutputBytes: number;
+  waveMaxBytes?: number;
   bridgeJar?: string;
   bridgeToken?: string;
   bridgeHost?: string;

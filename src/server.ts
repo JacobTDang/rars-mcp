@@ -6,6 +6,7 @@ import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
+import { createWaveQuery, waveQuerySchema } from './tools/wave.js';
 
 export function createMcpServer(dependencies: ToolDependencies): McpServer {
   const handlers = createToolHandlers(dependencies);
@@ -61,6 +62,9 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   server.registerTool('rars_live_command', {
     description: 'Load, inspect, modify, or drive the visible RARS desktop session. This mutates the open GUI.', inputSchema: liveCommandSchema,
   }, handlers.liveCommand);
+  server.registerTool('wave_query', {
+    description: 'Read signal values at given times from a VCD waveform file in the workspace.', inputSchema: waveQuerySchema,
+  }, createWaveQuery(dependencies));
   // A client that advertises roots tells us which folders it is working in, so the
   // workspace follows the client instead of the folder this server started in.
   server.server.oninitialized = () => {

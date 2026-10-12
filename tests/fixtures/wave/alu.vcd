@@ -1,0 +1,86 @@
+$date
+	Mon Oct 12 13:21:28 2026
+
+$end
+$version
+	nvc 1.23.0
+$end
+$timescale
+	1fs
+$end
+$attrbegin misc 03 tb_alu.vhd 1 $end
+$attrbegin misc 04 1 7 $end
+$scope vhdl_architecture tb_alu $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ! s_a[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 " s_b[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 # s_sum[3:0] $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 $ s_ovfl $end
+$attrbegin misc 02 REAL 1035 $end
+$var real 64 % s_ratio $end
+$attrbegin misc 02 INTEGER 1034 $end
+$var integer 32 & s_step $end
+$attrbegin misc 02 PHASE_T 1024 $end
+$var string 0 ' s_phase $end
+$attrbegin misc 03 alu.vhd 2 $end
+$attrbegin misc 04 2 14 $end
+$scope vhdl_architecture dut $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ! a[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 " b[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ( sum[3:0] $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 ) ovfl $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 * s_sum[3:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+b0101 *
+0)
+b0101 (
+ssetup '
+b00000000000000000000000000000000 &
+r1.5 %
+0$
+b0101 #
+b0010 "
+b0011 !
+$end
+#10000000
+b0111 !
+b0001 "
+b1000 #
+1$
+r0.25 %
+b00000000000000000000000000000001 &
+scheck '
+b1000 (
+1)
+b1000 *
+#20000000
+b0111 *
+b0111 (
+b00000000000000000000000000000010 &
+r-2 %
+b0111 #
+b1111 "
+b1000 !
+#30000000
+b01ZX !
+b0001 "
+bXXXX #
+b11111111111111111111111111111111 &
+bXXXX (
+bXXXX *
+x)
+sdone '
+x$
+#40000000

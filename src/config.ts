@@ -11,6 +11,7 @@ export interface AppConfig {
   maxOutputBytes: number;
   maxInspectionBytes: number;
   sessionIdleMs: number;
+  waveMaxBytes: number;
   bridgeHost: string;
   bridgeJar: string;
   liveDiscoveryDir: string;
@@ -72,6 +73,7 @@ export function loadConfig(env: Environment = process.env): AppConfig {
     maxOutputBytes: positiveInteger(env, 'RARS_MAX_OUTPUT_BYTES', 1_048_576),
     maxInspectionBytes: positiveInteger(env, 'RARS_MAX_INSPECTION_BYTES', 65_536),
     sessionIdleMs: positiveInteger(env, 'RARS_SESSION_IDLE_MS', 30 * 60 * 1000),
+    waveMaxBytes: positiveInteger(env, 'WAVE_MAX_BYTES', 64 * 1024 * 1024),
     bridgeHost: env.RARS_BRIDGE_HOST ?? '127.0.0.1',
     bridgeJar: resolve(env.RARS_BRIDGE_JAR ?? join(root, 'java', 'bridge', 'build', 'rars-mcp-bridge.jar')),
     liveDiscoveryDir: resolve(env.RARS_LIVE_DISCOVERY_DIR ?? join(root, '.runtime')),

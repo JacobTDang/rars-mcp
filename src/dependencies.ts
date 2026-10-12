@@ -15,6 +15,7 @@ export async function createToolDependencies(config: AppConfig, env: Environment
     rarsJar: config.rarsJar,
     timeoutMs: config.executionTimeoutMs,
     maxOutputBytes: config.maxOutputBytes,
+    waveMaxBytes: config.waveMaxBytes,
     bridgeJar: config.bridgeJar,
     bridgeToken: env.RARS_HEADLESS_BRIDGE_TOKEN ?? 'internal-headless-bridge',
     bridgeHost: config.bridgeHost,
