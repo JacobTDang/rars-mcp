@@ -268,16 +268,15 @@ public final class RarsSimulator {
         }
         List<ProgramStatement> statements = statementsByAddress();
         int address = windowAddress(location);
-        int centre = 0;
-        while (centre < statements.size() && statements.get(centre).getAddress() != address) centre++;
-        if (centre == statements.size()) {
-            String at = NUMBER.matcher(location).matches() ? Words.address(address) : location + " (" + Words.address(address) + ")";
-            throw new IllegalArgumentException("No instruction at " + at);
+        int below = 0;
+        while (below < statements.size() && Integer.compareUnsigned(statements.get(below).getAddress(), address) < 0) below++;
+        if (below < statements.size() && statements.get(below).getAddress() == address) {
+            return window(statements, below - (count - 1) / 2, below + count / 2);
         }
-        List<Map<String, Object>> result = new ArrayList<>();
-        int last = Math.min(statements.size() - 1, centre + count / 2);
-        for (int index = Math.max(0, centre - (count - 1) / 2); index <= last; index++) result.add(instruction(statements.get(index)));
-        return result;
+        // pc with no instruction, as after the program exits: the window ends at the last instruction below it.
+        if (location.equals("pc") && below > 0) return window(statements, below - count, below - 1);
+        String at = NUMBER.matcher(location).matches() ? Words.address(address) : location + " (" + Words.address(address) + ")";
+        throw new IllegalArgumentException("No instruction at " + at);
     }
 
     // Every instruction from one location to another, both included.
@@ -295,6 +294,13 @@ public final class RarsSimulator {
             throw new IllegalArgumentException("The range " + from + " to " + to + " holds " + result.size()
                     + " instructions; the limit is " + MAX_INSTRUCTION_WINDOW);
         }
+        return result;
+    }
+
+    // The statements from first to last, both included, clipped to the program.
+    private static List<Map<String, Object>> window(List<ProgramStatement> statements, int first, int last) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int index = Math.max(0, first); index <= Math.min(statements.size() - 1, last); index++) result.add(instruction(statements.get(index)));
         return result;
     }
 

@@ -56,7 +56,8 @@ const maxInstructionWindow = 200;
 const windowLocation = 'pc, a code label, an address, or file:line';
 // Flat like debugCommandSchema, so every client sees all four fields; the refinement allows one form.
 const instructionWindowSchema = z.strictObject({
-  around: z.string().min(1).describe(`Centre of the window: ${windowLocation}. Defaults to pc`).optional(),
+  around: z.string().min(1).describe(`Centre of the window: ${windowLocation}. Defaults to pc; when pc has no `
+    + 'instruction, as after the program exits, the window ends at the last instruction before it').optional(),
   count: z.number().int().min(1).max(maxInstructionWindow)
     .describe(`Instructions in the window around the centre, 10 by default and at most ${maxInstructionWindow}`).optional(),
   from: z.string().min(1).describe(`Start of an inclusive range, given with to: ${windowLocation}`).optional(),

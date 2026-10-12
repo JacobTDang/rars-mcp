@@ -143,6 +143,22 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('ends the window at the last instruction once pc has moved past the program', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+    const addresses = async (request: Parameters<HeadlessSession['inspect']>[0]) =>
+      ((await session.inspect(request)) as { instructions: Array<{ address: string }> }).instructions.map((item) => item.address);
+
+    expect(await session.command({ action: 'continue' })).toMatchObject({ stopReason: 'exited', programCounter: '0x00400010' });
+    await expect(addresses({ instructions: {} })).resolves.toEqual(['0x00400000', '0x00400004', '0x00400008', '0x0040000c']);
+    await expect(addresses({ instructions: { around: 'pc', count: 2 } })).resolves.toEqual(['0x00400008', '0x0040000c']);
+    await expect(session.inspect({ instructions: { around: '0x00400010' } })).rejects.toThrow('No instruction at 0x00400010');
+    await session.close();
+  });
+
   it('refuses an instruction range longer than 200 instructions', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rars-window-'));
     await writeFile(join(directory, 'long.asm'), `.text\nmain:\n${'  addi t0, t0, 1\n'.repeat(250)}`);
