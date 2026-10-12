@@ -68,16 +68,20 @@ outside them is refused. Folders come from, in order:
 throwaway programs. Pass a string for one `inline.s` file, or an array such as
 `[{ "name": "main.s", "text": "..." }, { "name": "lib.s", "text": "..." }]` for several files.
 
-Both accept `dump`, which writes a memory image with RARS's own dumper:
+Both accept `dump`, which uses RARS's memory-image dumper. Omit `file` to return text formats as
+`text` (`HexText` also returns normalized `words`) or binary formats as `bytesBase64`; include a
+workspace-relative `file` to write the image there as before:
 
 ```json
 "dump": [{ "segment": ".text", "format": "HexText", "file": "mem/imem.hex" }]
 ```
 
-`segment` is `.text`, `.data`, or a range like `0x400000-0x10000000`; `format` is one of
-`SegmentWindow`, `HexText`, `AsciiText`, `HEX`, `Binary`, `BinaryText`. With `rars_assemble` the
-image is written without running the program, which is what an instruction-memory image for a
-hardware simulation needs. The target folder must already exist.
+`segment` is `.text`, `.data`, a range like `0x400000-0x10000000`, or an exact-length object such
+as `{ "address": "0x10010000", "words": 180 }`. `{ "label": "results", "words": 180 }` resolves
+the start through the headless bridge's symbol table, so label dumps require the bridge to be
+configured. `words` is at most 65536. `format` is one of `SegmentWindow`, `HexText`, `AsciiText`,
+`HEX`, `Binary`, `BinaryText`. With `rars_assemble` the image is produced without running the
+program. For file-backed dumps, the target folder must already exist.
 
 ### Debugging
 

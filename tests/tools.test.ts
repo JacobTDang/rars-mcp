@@ -1,12 +1,12 @@
 import { access, copyFile, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { runRars } from '../src/rars/cli.js';
 import { SessionStore } from '../src/sessions/store.js';
 import { createToolHandlers } from '../src/tools/handlers.js';
-import { assembleSchema, runSchema } from '../src/tools/schemas.js';
+import { assembleSchema, dumpSchema, runSchema } from '../src/tools/schemas.js';
 import { Workspace } from '../src/workspace.js';
 
 describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
@@ -74,6 +74,81 @@ describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
 });
 
 describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
+  it('returns an inline HexText dump matching the requested memory range', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['hello.asm'], memoryRanges: ['0x10010000-0x10010004'],
+      dump: [{ segment: { address: '0x10010000', words: 2 }, format: 'HexText' }],
+    });
+    const structured = result.structuredContent as {
+      memory: Array<{ hex: string }>;
+      dumps: Array<{ text: string; words: string[] }>;
+    };
+
+    expect(structured.dumps[0]!.words).toEqual(structured.memory.map(({ hex }) => hex));
+    expect(structured.dumps[0]!.text).toContain('6c6c6568');
+  });
+
+  it('returns an inline binary dump as base64', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.assemble({
+      files: ['dump-array.asm'],
+      dump: [{ segment: { address: '0x10010000', words: 2 }, format: 'Binary' }],
+    });
+    const dump = (result.structuredContent as { dumps: Array<{ bytesBase64: string }> }).dumps[0]!;
+
+    expect(Buffer.from(dump.bytesBase64, 'base64')).toHaveLength(8);
+  });
+
+  it('returns exactly the requested number of words for an address dump', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.assemble({
+      files: ['dump-array.asm'],
+      dump: [{ segment: { address: '0x10010000', words: 3 }, format: 'HexText' }],
+    });
+
+    expect((result.structuredContent as { dumps: Array<{ words: string[] }> }).dumps[0]!.words).toEqual([
+      '0x00000001', '0x00000002', '0x00000003',
+    ]);
+  });
+
+  it('resolves a label dump through the headless bridge', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+      bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const result = await handlers.assemble({
+      files: ['dump-array.asm'],
+      dump: [{ segment: { label: 'results', words: 4 }, format: 'HexText' }],
+    });
+
+    expect((result.structuredContent as { dumps: Array<{ words: string[] }> }).dumps[0]!.words).toEqual([
+      '0x00000001', '0x00000002', '0x00000003', '0x00000004',
+    ]);
+  });
+
   it('returns requested registers and memory as structured values', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
@@ -136,6 +211,67 @@ describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
 });
 
 describe('headless tool handlers', () => {
+  it('errors clearly when a label dump has no bridge', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'program.asm'), '.data\nresults: .word 1\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: vi.fn(),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    await expect(handlers.assemble({
+      files: ['program.asm'],
+      dump: [{ segment: { label: 'results', words: 1 }, format: 'HexText' }],
+    })).rejects.toThrow(/label dumps require.*bridge/i);
+  });
+
+  it('removes the temporary inline dump file after reading it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    let dumpFolder: string | undefined;
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async (options) => {
+        const file = options.request.dumps![0]!.file;
+        dumpFolder = dirname(file);
+        await writeFile(file, '00000001\n');
+        return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, truncated: false };
+      },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.assemble({
+      source: '.data\n.word 1\n', dump: [{ segment: '.data', format: 'HexText' }],
+    });
+
+    expect((result.structuredContent as { dumps: Array<{ words: string[] }> }).dumps[0]!.words)
+      .toEqual(['0x00000001']);
+    expect(dumpFolder).toBeTruthy();
+    await expect(access(dumpFolder!)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves assembly diagnostics when an inline dump was not created', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'bad.asm'), 'bad');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async () => ({
+        exitCode: 0, signal: null, stdout: '',
+        stderr: `Error in ${join(root, 'bad.asm')} line 1 column 1: bad instruction\n`,
+        timedOut: false, truncated: false,
+      }),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.assemble({
+      files: ['bad.asm'], dump: [{ segment: '.text', format: 'HexText' }],
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: { diagnostics: [{ message: 'bad instruction' }] },
+    });
+  });
+
   it('removes the temporary source folder after a run', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     let sourceFolder: string | undefined;
@@ -293,5 +429,13 @@ describe('inline source schemas', () => {
     expect(result.error?.issues).toContainEqual(expect.objectContaining({
       message: 'source names must be unique',
     }));
+  });
+});
+
+describe('dump schema', () => {
+  it.each([0, 1.5, 65537])('rejects an invalid word count of %s', (words) => {
+    expect(dumpSchema.safeParse({
+      segment: { address: '0x10010000', words }, format: 'HexText',
+    }).success).toBe(false);
   });
 });

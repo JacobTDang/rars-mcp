@@ -1,9 +1,15 @@
 import { z } from 'zod';
 
+const dumpWordsSchema = z.number().int().positive().max(65_536);
+const dumpSegmentSchema = z.union([
+  z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/),
+  z.strictObject({ label: z.string().min(1), words: dumpWordsSchema }),
+  z.strictObject({ address: z.string().regex(/^0x[0-9a-fA-F]+$/), words: dumpWordsSchema }),
+]);
 export const dumpSchema = z.object({
-  segment: z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/),
+  segment: dumpSegmentSchema,
   format: z.enum(['SegmentWindow', 'HexText', 'AsciiText', 'HEX', 'Binary', 'BinaryText']),
-  file: z.string().min(1),
+  file: z.string().min(1).optional(),
 });
 
 const sourceFileSchema = z.object({
@@ -137,6 +143,7 @@ export const liveCommandSchema = z.object({
 
 export type AssembleInput = z.infer<typeof assembleSchema>;
 export type RunInput = z.infer<typeof runSchema>;
+export type DumpInput = z.infer<typeof dumpSchema>;
 export type CloseSessionInput = z.infer<typeof closeSessionSchema>;
 export type DebugStartInput = z.infer<typeof debugStartSchema>;
 export type DebugCommandInput = z.infer<typeof debugCommandSchema>;
