@@ -7,12 +7,14 @@ import type { VhdlCompileResult, VhdlDiagnostic, VhdlMessage, VhdlSimulator } fr
 import type { Workspace } from '../workspace.js';
 
 // A basic VHDL identifier. It also keeps option-like values such as "-rf" off the simulator's command line.
-const identifier = z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'must be a VHDL identifier');
-const files = z.array(z.string().min(1)).min(1)
+export const identifier = z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'must be a VHDL identifier');
+export const files = z.array(z.string().min(1)).min(1)
   .describe('VHDL files, analysed in this order: packages and entities before the units that use them');
 // A literal list rather than z.enum, which would reorder these number-like keys and list 19 first.
-const std = z.literal(['93', '02', '08', '19']).describe("VHDL standard, 08 by default; 02 matches Questa's default").optional();
+export const std = z.literal(['93', '02', '08', '19']).describe("VHDL standard, 08 by default; 02 matches Questa's default").optional();
 const work = identifier.describe('Library the files are analysed into, work by default').optional();
+export const stopTime = z.string().regex(/^\s*\d+\s*(?:fs|ps|ns|us|ms|sec)\s*$/, 'must be a whole number and a unit: fs, ps, ns, us, ms or sec')
+  .describe('Simulation time to stop at, such as "1 us"; without it the run lasts until no events remain').optional();
 
 export const vhdlCompileSchema = z.object({ files, std, work });
 
@@ -21,8 +23,7 @@ export const vhdlRunSchema = z.object({
   files,
   std,
   work,
-  stopTime: z.string().regex(/^\s*\d+\s*(?:fs|ps|ns|us|ms|sec)\s*$/, 'must be a whole number and a unit: fs, ps, ns, us, ms or sec')
-    .describe('Simulation time to stop at, such as "1 us"; without it the run lasts until no events remain').optional(),
+  stopTime,
   generics: z.record(identifier, z.string().min(1)).describe('Values for the testbench generics, such as { "WIDTH": "8" }').optional(),
   wave: z.object({
     file: z.string().min(1).describe('Workspace file to write; its folder must already exist'),
@@ -50,9 +51,8 @@ function formatMessage({ time, severity, text, source }: VhdlMessage): string {
   return `${location}${severity} at ${time}: ${text}`;
 }
 
-function reply(
-  action: string, passed: string, result: VhdlCompileResult & { messages?: VhdlMessage[] }, extra: Record<string, unknown> = {},
-): CallToolResult {
+// A summary line, then each diagnostic and message worth showing.
+export function describeRun(action: string, passed: string, result: VhdlCompileResult & { messages?: VhdlMessage[] }): string[] {
   const messages = (result.messages ?? []).filter((message) => message.severity !== 'note');
   const details = [...result.diagnostics.map(formatDiagnostic), ...messages.map(formatMessage)];
   const explained = result.timedOut || result.truncated ||
@@ -63,8 +63,14 @@ function reply(
   const summary = result.timedOut ? `${action} timed out` :
     result.truncated ? `${action} output exceeded its limit` :
     result.ok ? passed : `${action} failed`;
+  return [summary, ...details];
+}
+
+function reply(
+  action: string, passed: string, result: VhdlCompileResult & { messages?: VhdlMessage[] }, extra: Record<string, unknown> = {},
+): CallToolResult {
   return {
-    content: [{ type: 'text', text: [summary, ...details].join('\n') }],
+    content: [{ type: 'text', text: describeRun(action, passed, result).join('\n') }],
     structuredContent: { ...result, ...extra },
     ...(result.ok ? {} : { isError: true }),
   };

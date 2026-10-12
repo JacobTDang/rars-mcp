@@ -6,6 +6,7 @@ import { createDoFileCheckHandler, doFileCheckSchema } from './tools/dofile.js';
 import { createEncodeHandler, encodeSchema } from './tools/encode.js';
 import { createEvalHandler, evalSchema } from './tools/eval.js';
 import { createToolHandlers, type ToolDependencies } from './tools/handlers.js';
+import { createVhdlMutateHandler, vhdlMutateSchema } from './tools/mutate.js';
 import { createStatusHandler, statusSchema } from './tools/status.js';
 import { createVhdlHandlers, vhdlCompileSchema, vhdlRunSchema } from './tools/vhdl.js';
 import { assembleSchema, closeSessionSchema, debugCommandSchema, debugStartSchema, emptySchema, inspectSchema, liveCommandSchema, liveConnectSchema, modifySchema, runSchema } from './tools/schemas.js';
@@ -83,6 +84,10 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Analyse, elaborate and run a VHDL testbench with nvc; returns each report and assertion with its simulation time.',
     inputSchema: vhdlRunSchema,
   }, vhdl.run);
+  server.registerTool('vhdl_mutate', {
+    description: 'Score VHDL testbenches: run them against mutated copies of a design and report which mutations each one catches.',
+    inputSchema: vhdlMutateSchema,
+  }, createVhdlMutateHandler(dependencies));
   // A client that advertises roots tells us which folders it is working in, so the
   // workspace follows the client instead of the folder this server started in.
   server.server.oninitialized = () => {
