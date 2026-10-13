@@ -65,6 +65,7 @@ const passed: VhdlRunResult = {
 function recordingSimulator() {
   const runs: Array<{ request: VhdlRunRequest; limits: VhdlLimits }> = [];
   const vhdl: VhdlSimulator = {
+    name: 'fake', executable: 'fake-simulator', version: async () => { throw new Error('vhdl_mutate never reads the version'); },
     compile: async () => { throw new Error('vhdl_mutate only runs testbenches'); },
     run: async (request, limits) => { runs.push({ request, limits }); return passed; },
   };
@@ -76,7 +77,7 @@ function countingNvc() {
   const nvc = createNvcSimulator({ executable: simulator });
   const runs: VhdlRunRequest[] = [];
   const vhdl: VhdlSimulator = {
-    compile: nvc.compile,
+    ...nvc,
     run: (request, limits) => { runs.push(request); return nvc.run(request, limits); },
   };
   return { vhdl, runs };

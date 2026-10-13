@@ -49,6 +49,21 @@ export function createNvcSimulator(options: { executable: string }): VhdlSimulat
   };
 
   return {
+    name: 'nvc',
+    executable: options.executable,
+    // The first line reads like "nvc 1.23.0 (Using LLVM 23.1.1)".
+    version: async (limits) => {
+      const result = await runSimulatorProcess({
+        executable: options.executable, args: ['--version'], cwd: tmpdir(), env: { ...process.env, NVC_COLORS: 'never' }, ...limits,
+      });
+      const output = `${result.stdout}${result.stderr}`.trim().slice(0, 200);
+      if (result.timedOut) throw new Error(`${options.executable} --version did not finish within ${limits.timeoutMs} ms`);
+      if (result.truncated) throw new Error(`${options.executable} --version printed more than ${limits.maxOutputBytes} bytes`);
+      if (result.exitCode !== 0) throw new Error(`${options.executable} --version failed (exit ${result.exitCode ?? result.signal}): ${output}`);
+      const version = /^nvc (\S+)/.exec(result.stdout)?.[1];
+      if (version === undefined) throw new Error(`Unrecognised ${options.executable} --version output: ${output}`);
+      return version;
+    },
     // Analysis alone simulates nothing, so it has no messages.
     compile: async (request, limits) => {
       const { messages: _messages, ...result } = await execute(request, limits);
