@@ -50,8 +50,12 @@ public final class ProtocolSelfTest {
         requireFailure(() -> Words.parseValue(null, 4, "t0"), "Invalid value for t0: null");
 
         require(Words.parseAddress("0x10010000") == 0x10010000 && Words.parseAddress("0xffffffff") == -1 && Words.parseAddress(4194304L) == 0x00400000, "addresses");
-        requireFailure(() -> Words.parseAddress("0x100000000"), "Address out of range: 0x100000000");
-        requireFailure(() -> Words.parseAddress("-4"), "Address out of range: -4");
+        require(Words.parseAddress("4294967295") == -1 && Words.parseAddress(4294967295L) == -1, "the highest address in decimal");
+        String outOfRange = "Address must be from 0 through 0xffffffff: ";
+        requireFailure(() -> Words.parseAddress("0x100000000"), outOfRange + "0x100000000");
+        requireFailure(() -> Words.parseAddress("4294967296"), outOfRange + "4294967296");
+        requireFailure(() -> Words.parseAddress(4294967296L), outOfRange + "4294967296");
+        requireFailure(() -> Words.parseAddress("-4"), outOfRange + "-4");
         requireFailure(() -> Words.parseAddress("nope"), "Invalid address: nope");
     }
 

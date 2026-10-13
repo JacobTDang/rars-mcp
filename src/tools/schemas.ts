@@ -151,10 +151,14 @@ const instructionWindowSchema = z.strictObject({
 });
 const byteWidthSchema = z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]);
 // 0x hex or decimal. The bridge reads a decimal number with a leading 0 as octal, so it has none.
-const numberSchema = (field: string, pattern: RegExp) => z.string()
-  .regex(pattern, { error: (issue) => `${field} must be a hex or decimal number: ${JSON.stringify(issue.input)}` });
-const addressSchema = numberSchema('address', /^(?:0[xX][0-9a-fA-F]+|0|[1-9][0-9]*)$/);
-const valueSchema = numberSchema('value', /^(?:0[xX][0-9a-fA-F]+|-?(?:0|[1-9][0-9]*))$/);
+const numberPattern = /^(?:0[xX][0-9a-fA-F]+|-?(?:0|[1-9][0-9]*))$/;
+const numberSchema = (field: string) => z.string()
+  .regex(numberPattern, { error: (issue) => `${field} must be a hex or decimal number: ${JSON.stringify(issue.input)}`, abort: true });
+// RARS addresses are 32 bits, so a wider one is refused rather than wrapped.
+const addressSchema = numberSchema('address').refine((address) => BigInt(address) >= 0n && BigInt(address) <= 0xffffffffn, {
+  error: (issue) => `address must be from 0 through 0xffffffff: ${JSON.stringify(issue.input)}`,
+});
+const valueSchema = numberSchema('value');
 const memoryReadSchema = z.strictObject({ address: addressSchema, length: byteWidthSchema });
 const memoryWriteSchema = z.strictObject({ address: addressSchema, value: valueSchema, width: byteWidthSchema });
 export const inspectSchema = z.strictObject({

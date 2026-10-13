@@ -55,6 +55,10 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("nope"), "Unknown label: nope", "unknown label");
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("value"), "value is a data label, not a code label", "data label");
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("debug.asm:2"), "No instruction at debug.asm:2", "line without code");
+        requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("0x100400000"),
+                "Address must be from 0 through 0xffffffff: 0x100400000", "breakpoint beyond 32 bits");
+        requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("-4"),
+                "Address must be from 0 through 0xffffffff: -4", "negative breakpoint");
         Map<String, Object> exited = simulator.runUntilStop(1000, NEVER);
         require("exited".equals(exited.get("stopReason")) && "terminated".equals(exited.get("status")), "exit reason");
 
@@ -134,6 +138,10 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("nope", 3), "Unknown label: nope", "window around an unknown label");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "nope"), "Unknown label: nope", "range to an unknown label");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("0x10010000", 3), "No instruction at 0x10010000", "window around data");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("0x100400008", 3),
+                "Address must be from 0 through 0xffffffff: 0x100400008", "window around an address beyond 32 bits");
+        requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "4299161608"),
+                "Address must be from 0 through 0xffffffff: 4299161608", "range to an address beyond 32 bits");
         String countMessage = "count must be between 1 and 200";
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 0), countMessage, "empty window");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("pc", 201), countMessage, "window over the limit");
@@ -200,7 +208,7 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalArgumentException.class, () -> simulator.modify(none, Arrays.asList(
                 write("0x10010000", 4, "0x55"), write("0x10010004", 1, "0x1ff"))), "Value for 0x10010004 does not fit in 1 byte: 0x1ff", "memory value too wide");
         requireThrows(IllegalArgumentException.class, () -> simulator.modify(none, Arrays.asList(
-                write("0x10010000", 4, "0x55"), write("0x100000000", 4, "0x66"))), "Address out of range: 0x100000000", "address beyond 32 bits");
+                write("0x10010000", 4, "0x55"), write("0x100000000", 4, "0x66"))), "Address must be from 0 through 0xffffffff: 0x100000000", "address beyond 32 bits");
         // RARS stores the high word of 8 bytes first; here only the high word is in the data segment.
         requireThrows(AddressErrorException.class, () -> simulator.modify(none, Arrays.asList(write("0x0ffffffc", 8, "-1"))),
                 "address out of range 0x0ffffffc", "8 bytes across the start of the data segment");

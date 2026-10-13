@@ -175,7 +175,7 @@ public final class BridgeServer {
                 Object ranges = payload.get("memory");
                 if (ranges instanceof List) for (Object item : (List<?>) ranges) {
                     Map<String, Object> range = (Map<String, Object>) item;
-                    int address = integer(range.get("address"));
+                    int address = Words.parseAddress(range.get("address"));
                     int width = integer(range.get("width"));
                     Map<String, Object> entry = mapOf("address", Words.address(address), "width", width);
                     entry.putAll(Words.word(((Number) simulator.readMemory(address, width)).longValue(), width));

@@ -17,7 +17,7 @@ describe('memory address and value schemas', () => {
   const sessionId = '00000000-0000-4000-8000-000000000000';
   const issuesOf = (result: { error?: { issues: unknown[] } }) => result.error?.issues;
 
-  it.each(['x', '', '0x', '-4', '+4', '1.5', '0x1g', ' 4', '#10', '010'])('refuses the address %j', (address) => {
+  it.each(['x', '', '0x', '+4', '1.5', '0x1g', ' 4', '#10', '010', '-0x4'])('refuses the address %j', (address) => {
     const issue = { path: ['memory', 0, 'address'], message: `address must be a hex or decimal number: ${JSON.stringify(address)}` };
 
     expect(issuesOf(inspectSchema.safeParse({ sessionId, memory: [{ address, length: 4 }] })))
@@ -26,6 +26,27 @@ describe('memory address and value schemas', () => {
       .toEqual([expect.objectContaining(issue)]);
     expect(issuesOf(liveCommandSchema.safeParse({ sessionId, command: { action: 'inspect', memory: [{ address, length: 4 }] } })))
       .toEqual([expect.objectContaining({ ...issue, path: ['command', ...issue.path] })]);
+  });
+
+  it.each(['0x100000000', '4294967296', '0x1FFFFFFFF', '-4', '-1'])('refuses the address %j outside 32 bits', (address) => {
+    const issue = { path: ['memory', 0, 'address'], message: `address must be from 0 through 0xffffffff: ${JSON.stringify(address)}` };
+
+    expect(issuesOf(inspectSchema.safeParse({ sessionId, memory: [{ address, length: 4 }] })))
+      .toEqual([expect.objectContaining(issue)]);
+    expect(issuesOf(modifySchema.safeParse({ sessionId, memory: [{ address, value: '1', width: 4 }] })))
+      .toEqual([expect.objectContaining(issue)]);
+    expect(issuesOf(liveCommandSchema.safeParse({ sessionId, command: { action: 'inspect', memory: [{ address, length: 4 }] } })))
+      .toEqual([expect.objectContaining({ ...issue, path: ['command', ...issue.path] })]);
+    expect(issuesOf(liveCommandSchema.safeParse({ sessionId, command: { action: 'modify', memory: [{ address, value: '1', width: 4 }] } })))
+      .toEqual([expect.objectContaining({ ...issue, path: ['command', ...issue.path] })]);
+  });
+
+  it.each(['0xffffffff', '0xFFFFFFFF', '4294967295', '0x00000000ffffffff'])('accepts the highest address %j', (address) => {
+    expect(inspectSchema.safeParse({ sessionId, memory: [{ address, length: 1 }] }).success).toBe(true);
+    expect(modifySchema.safeParse({ sessionId, memory: [{ address, value: '1', width: 1 }] }).success).toBe(true);
+    expect(liveCommandSchema.safeParse({ sessionId, command: { action: 'inspect', memory: [{ address, length: 1 }] } }).success).toBe(true);
+    expect(liveCommandSchema.safeParse({ sessionId, command: { action: 'modify', memory: [{ address, value: '1', width: 1 }] } }).success)
+      .toBe(true);
   });
 
   it.each(['abc', '', '0x', '--1', '1e3', '-0x1', '0x-1', '007', '-01'])('refuses the value %j', (value) => {
@@ -65,6 +86,12 @@ describe('memory address and value schemas', () => {
       expect(await call('rars_modify', { sessionId, memory: [{ address: '0x10010000', value: 'abc', width: 4 }] })).toEqual({
         isError: true, text: expect.stringContaining('memory.0.value: value must be a hex or decimal number: "abc"'),
       });
+      expect(await call('rars_inspect', { sessionId, memory: [{ address: '0x100000000', length: 4 }] })).toEqual({
+        isError: true, text: expect.stringContaining('memory.0.address: address must be from 0 through 0xffffffff: "0x100000000"'),
+      });
+      expect(await call('rars_live_command', {
+        sessionId, command: { action: 'modify', memory: [{ address: '4294967296', value: '1', width: 4 }] },
+      })).toEqual({ isError: true, text: expect.stringContaining('address must be from 0 through 0xffffffff: "4294967296"') });
       expect(get).not.toHaveBeenCalled();
     } finally {
       await client.close();
@@ -125,6 +152,36 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
       memory: [{ address: '0x10010000', width: 8, hex: '0x7fffffffffffffff', signed: '9223372036854775807' }],
     });
     await handlers.sessionClose({ sessionId });
+  });
+
+  // The schema refuses these first; the bridge refuses them too rather than reading a wrapped address.
+  it('refuses an inspect address outside 32 bits in the bridge and reads up to the top of memory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 3000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+    const started = await handlers.debugStart({ source: '.data\nword: .word 0x12345678\n.text\nmain:\n  li a7, 10\n  ecall\n' });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+    const read = async (address: string, length: 1 | 2 | 4 | 8) =>
+      (await handlers.inspect({ sessionId, memory: [{ address, length }] })).structuredContent as { memory: unknown[] };
+
+    try {
+      // 0x110010000 would wrap to 0x10010000, where the word is.
+      for (const address of ['0x100000000', '4294967296', '0x110010000', '-4']) {
+        await expect(read(address, 4)).rejects.toThrow(`Address must be from 0 through 0xffffffff: ${address}`);
+      }
+      await expect(handlers.modify({ sessionId, memory: [{ address: '0x110010000', value: '1', width: 4 }] }))
+        .rejects.toThrow('Address must be from 0 through 0xffffffff: 0x110010000');
+      expect((await read('0x10010000', 4)).memory).toEqual([{ address: '0x10010000', width: 4, hex: '0x12345678', signed: 305419896 }]);
+      expect((await read('0xfffffffc', 4)).memory).toEqual([{ address: '0xfffffffc', width: 4, hex: '0x00000000', signed: 0 }]);
+      // RARS's own error for the last byte comes through unchanged.
+      await expect(read('0xffffffff', 1)).rejects.toThrow('address out of range 0xffffffff');
+    } finally {
+      await handlers.sessionClose({ sessionId });
+    }
   });
 
   it('starts, inspects, mutates, steps, and closes a debug session', async () => {

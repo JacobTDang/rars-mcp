@@ -42,7 +42,7 @@ public final class Words {
     public static int parseAddress(Object value) {
         BigInteger number = decode(value);
         if (number == null) throw new IllegalArgumentException("Invalid address: " + value);
-        if (number.signum() < 0 || number.bitLength() > 32) throw new IllegalArgumentException("Address out of range: " + value);
+        if (number.signum() < 0 || number.bitLength() > 32) throw new IllegalArgumentException("Address must be from 0 through 0xffffffff: " + value);
         return number.intValue();
     }
 
