@@ -6,6 +6,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 
 import { createMcpServer } from '../src/server.js';
+import { debugCommandSchema, runSchema } from '../src/tools/schemas.js';
 import { Workspace } from '../src/workspace.js';
 
 const sessionId = '00000000-0000-4000-8000-000000000000';
@@ -95,6 +96,24 @@ describe('MCP server', () => {
     });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('maxSteps is only valid for continue');
+  });
+
+  it('caps timeoutMs and maxSteps at 2147483647', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ['rars_run', { files: ['prog.s'], timeoutMs: 2147483648 }, 'timeoutMs: must be at most 2147483647 ms'],
+      ['rars_run', { files: ['prog.s'], maxSteps: 2147483648 }, 'maxSteps: must be at most 2147483647'],
+      ['rars_debug_command', { sessionId, action: 'continue', maxSteps: 2147483648 }, 'maxSteps: must be at most 2147483647'],
+    ];
+    for (const [name, input, message] of cases) {
+      const result = await connection.client.callTool({ name, arguments: input });
+      expect(result.isError, JSON.stringify(input)).toBe(true);
+      expect(JSON.stringify(result.content), JSON.stringify(input)).toContain(message);
+    }
+    expect(runSchema.safeParse({ files: ['prog.s'], timeoutMs: 2147483647, maxSteps: 2147483647 }).success).toBe(true);
+    expect(debugCommandSchema.safeParse({ sessionId, action: 'continue', maxSteps: 2147483647 }).success).toBe(true);
   });
 
   it('publishes the instruction window and marks includeInstructions as deprecated', async () => {

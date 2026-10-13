@@ -53,6 +53,14 @@ describe('loadConfig', () => {
       .toThrow('WAVE_MAX_BYTES must be a positive integer');
   });
 
+  it.each(['RARS_EXECUTION_TIMEOUT_MS', 'RARS_SESSION_IDLE_MS'])('caps %s at the longest delay a Node timer takes', (name) => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'rars-config-'));
+
+    expect(() => loadConfig({ RARS_WORKSPACE: workspaceRoot, [name]: '2147483648' }))
+      .toThrow(`${name} must be at most 2147483647 ms`);
+    expect(() => loadConfig({ RARS_WORKSPACE: workspaceRoot, [name]: '2147483647' })).not.toThrow();
+  });
+
   it('rejects a non-positive execution timeout', () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'rars-config-'));
 

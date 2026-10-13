@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { MAX_TIMER_MS } from '../config.js';
 import { CLI_REGISTER_FORMS, memoryRangeProblem, registerProblem } from '../rars/cli.js';
 
 // zod reports a union whose every option fails as just "Invalid input", which hides a misspelt key.
@@ -77,6 +78,12 @@ export const assembleSchema = z.strictObject({
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);
 
+export const timeoutMsSchema = z.number().int().positive()
+  .max(MAX_TIMER_MS, `must be at most ${MAX_TIMER_MS} ms, the longest delay a Node timer takes`);
+// RARS and the bridge read a step count as a Java int.
+const MAX_STEPS = 2_147_483_647;
+const maxStepsSchema = z.number().int().positive().max(MAX_STEPS, `must be at most ${MAX_STEPS}, the largest step count RARS takes`);
+
 // A string the check passes; otherwise the check's message, which names the entry, is the issue.
 const checkedString = (problem: (value: string) => string | undefined) => z.string().superRefine((value, context) => {
   const message = problem(value);
@@ -87,13 +94,13 @@ export const runSchema = z.strictObject({
   ...sourceSelection,
   stdin: z.string().optional(),
   programArgs: z.array(z.string()).optional(),
-  maxSteps: z.number().int().positive().optional(),
+  maxSteps: maxStepsSchema.optional(),
   instructionCount: z.boolean().optional(),
   registers: z.array(checkedString(registerProblem))
     .describe(`Registers to print after the run: ${CLI_REGISTER_FORMS}. Read pc with rars_inspect`).optional(),
   memoryRanges: z.array(checkedString(memoryRangeProblem))
     .describe('Word-aligned address ranges to print after the run, both ends included, such as 0x10010000-0x1001000c').optional(),
-  timeoutMs: z.number().int().positive().optional(),
+  timeoutMs: timeoutMsSchema.optional(),
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);
 
@@ -114,7 +121,7 @@ export const debugCommandSchema = z.strictObject({
   sessionId: z.string().uuid(),
   action: z.enum([...executionActions, ...breakpointActions]),
   address: z.string().describe('Breakpoint location: an address, a code label, or file:line').optional(),
-  maxSteps: z.number().int().positive().optional(),
+  maxSteps: maxStepsSchema.optional(),
 }).superRefine((input, context) => {
   if (input.action !== 'continue' && input.maxSteps !== undefined) {
     context.addIssue({ code: 'custom', path: ['maxSteps'], message: 'maxSteps is only valid for continue' });

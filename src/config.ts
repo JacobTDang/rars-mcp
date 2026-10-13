@@ -21,6 +21,9 @@ export interface AppConfig {
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
+// Node runs a timer whose delay is above this at once, after a TimeoutOverflowWarning.
+export const MAX_TIMER_MS = 2_147_483_647;
+
 function positiveInteger(env: Environment, name: string, fallback: number): number {
   const rawValue = env[name];
   if (rawValue === undefined) {
@@ -33,6 +36,18 @@ function positiveInteger(env: Environment, name: string, fallback: number): numb
       'INVALID_CONFIGURATION',
       `${name} must be a positive integer`,
       { name, value: rawValue },
+    );
+  }
+  return value;
+}
+
+function milliseconds(env: Environment, name: string, fallback: number): number {
+  const value = positiveInteger(env, name, fallback);
+  if (value > MAX_TIMER_MS) {
+    throw new RarsError(
+      'INVALID_CONFIGURATION',
+      `${name} must be at most ${MAX_TIMER_MS} ms, the longest delay a Node timer takes`,
+      { name, value: env[name] },
     );
   }
   return value;
@@ -70,10 +85,10 @@ export function loadConfig(env: Environment = process.env): AppConfig {
   return {
     workspaceRoots,
     rarsJar: resolve(env.RARS_JAR ?? join(root, '.cache', 'rars1_6.jar')),
-    executionTimeoutMs: positiveInteger(env, 'RARS_EXECUTION_TIMEOUT_MS', 10_000),
+    executionTimeoutMs: milliseconds(env, 'RARS_EXECUTION_TIMEOUT_MS', 10_000),
     maxOutputBytes: positiveInteger(env, 'RARS_MAX_OUTPUT_BYTES', 1_048_576),
     maxInspectionBytes: positiveInteger(env, 'RARS_MAX_INSPECTION_BYTES', 65_536),
-    sessionIdleMs: positiveInteger(env, 'RARS_SESSION_IDLE_MS', 30 * 60 * 1000),
+    sessionIdleMs: milliseconds(env, 'RARS_SESSION_IDLE_MS', 30 * 60 * 1000),
     waveMaxBytes: positiveInteger(env, 'WAVE_MAX_BYTES', 64 * 1024 * 1024),
     bridgeHost: env.RARS_BRIDGE_HOST ?? '127.0.0.1',
     bridgeJar: resolve(env.RARS_BRIDGE_JAR ?? join(root, 'java', 'bridge', 'build', 'rars-mcp-bridge.jar')),
