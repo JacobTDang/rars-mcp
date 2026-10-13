@@ -1,9 +1,127 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { RarsError } from '../src/errors.js';
 import { HeadlessSession } from '../src/sessions/headless.js';
+
+// Writes a shell script that stands in for java. It ignores the bridge arguments, and
+// "$(dirname "$0")" is the folder it can leave files in for the test.
+async function fakeJava(lines: string[]): Promise<{ executable: string; directory: string }> {
+  const directory = await mkdtemp(join(tmpdir(), 'rars-fake-java-'));
+  const executable = join(directory, 'java');
+  await writeFile(executable, `#!/bin/sh\n${lines.join('\n')}\n`);
+  await chmod(executable, 0o755);
+  return { executable, directory };
+}
+
+function startBridge(javaExecutable: string, timeoutMs: number): Promise<HeadlessSession> {
+  return HeadlessSession.create({
+    javaExecutable, bridgeJar: '/unused/bridge.jar', rarsJar: '/unused/rars.jar', token: 'test-secret',
+    files: ['/unused/program.asm'], timeoutMs,
+  });
+}
+
+async function recordedPids(directory: string): Promise<number[]> {
+  return (await readFile(join(directory, 'pids'), 'utf8')).trim().split(/\s+/).map(Number);
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+// A killed grandchild is reaped by init, so it can take a moment to disappear.
+async function expectStopped(pids: number[]): Promise<void> {
+  await vi.waitFor(() => expect(pids.filter(isRunning)).toEqual([]), { timeout: 3_000 });
+}
+
+describe('HeadlessSession startup', () => {
+  it('kills a bridge that never prints its port and reports the limit and its output', async () => {
+    const { executable, directory } = await fakeJava([
+      'echo "JVM warming up"',
+      'echo "still loading classes" >&2',
+      'sleep 60 &',
+      'echo "$$ $!" > "$(dirname "$0")/pids"',
+      'wait',
+    ]);
+
+    const attempt = startBridge(executable, 1_500);
+
+    await expect(attempt).rejects.toThrow(RarsError);
+    await expect(attempt).rejects.toMatchObject({
+      code: 'BRIDGE_START_TIMEOUT',
+      message: expect.stringMatching(/^RARS bridge did not start within 1500 ms\n[\s\S]*JVM warming up[\s\S]*still loading classes/),
+      details: { timeoutMs: 1_500, stdout: 'JVM warming up\n', stderr: 'still loading classes\n' },
+    });
+    await expectStopped(await recordedPids(directory));
+  }, 15_000);
+
+  it('fails as soon as the bridge exits before it is ready, with what it printed', async () => {
+    const { executable } = await fakeJava([
+      'echo "RARS_MCP_PORT=not-a-port"',
+      'echo "#@!garbage%%"',
+      'echo "Error: Could not find or load main class dev.rarsmcp.server.BridgeServer" >&2',
+      'exit 3',
+    ]);
+    const started = Date.now();
+
+    const attempt = startBridge(executable, 60_000);
+
+    await expect(attempt).rejects.toThrow(RarsError);
+    await expect(attempt).rejects.toMatchObject({
+      code: 'BRIDGE_START_FAILED',
+      message: expect.stringMatching(/^RARS bridge exited during startup with code 3\n[\s\S]*#@!garbage%%[\s\S]*Could not find or load main class/),
+      details: {
+        exitCode: 3, signal: null,
+        stdout: 'RARS_MCP_PORT=not-a-port\n#@!garbage%%\n',
+        stderr: 'Error: Could not find or load main class dev.rarsmcp.server.BridgeServer\n',
+      },
+    });
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 15_000);
+
+  it('keeps the first 64 KiB of each stream in the startup error', async () => {
+    const { executable } = await fakeJava(['head -c 70000 /dev/zero | tr "\\000" x', 'exit 1']);
+
+    const error = await startBridge(executable, 60_000).then(() => undefined, (reason: unknown) => reason);
+
+    expect(error).toMatchObject({ code: 'BRIDGE_START_FAILED', details: { stderr: '' } });
+    expect((error as RarsError).details!.stdout).toBe(`${'x'.repeat(65_536)}\n[cut at 65536 of 70000 bytes]`);
+    expect((error as RarsError).message).toContain('stderr: (none)');
+  }, 15_000);
+
+  it('counts the wait for the hello reply against the same limit', async () => {
+    const connections: Socket[] = [];
+    // Accepts the bridge connection and never answers it.
+    const silent = createServer((socket) => connections.push(socket));
+    await new Promise<void>((done) => silent.listen(0, '127.0.0.1', done));
+    const { port } = silent.address() as AddressInfo;
+    const { executable, directory } = await fakeJava([
+      'echo "$$" > "$(dirname "$0")/pids"',
+      `echo "RARS_MCP_PORT=${port}" >&2`,
+      'exec sleep 60',
+    ]);
+
+    try {
+      await expect(startBridge(executable, 1_500)).rejects.toMatchObject({
+        code: 'BRIDGE_START_TIMEOUT',
+        message: expect.stringMatching(new RegExp(`^RARS bridge did not start within 1500 ms\\n[\\s\\S]*RARS_MCP_PORT=${port}`)),
+      });
+      await expectStopped(await recordedPids(directory));
+    } finally {
+      for (const socket of connections) socket.destroy();
+      await new Promise<void>((done) => silent.close(() => done()));
+    }
+  }, 15_000);
+});
 
 describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
   it('controls a stateful RARS process and closes it', async () => {

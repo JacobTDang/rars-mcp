@@ -256,7 +256,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_BRIDGE_JAR` | `java/bridge/build/rars-mcp-bridge.jar` | The Java bridge used by debugger sessions |
 | `RARS_BRIDGE_HOST` | `127.0.0.1` | Host of the visible desktop session |
 | `RARS_LIVE_DISCOVERY_DIR` | `.runtime` | Where the launcher writes its port and token |
-| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run |
+| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, and for starting the Java bridge |
 | `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes |
