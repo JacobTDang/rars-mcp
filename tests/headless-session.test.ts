@@ -1,8 +1,8 @@
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RarsError } from '../src/errors.js';
 import { HeadlessSession } from '../src/sessions/headless.js';
@@ -43,23 +43,44 @@ async function expectStopped(pids: number[]): Promise<void> {
   await vi.waitFor(() => expect(pids.filter(isRunning)).toEqual([]), { timeout: 3_000 });
 }
 
+// Puts the startup limit on a fake clock, so it passes only when the test moves the clock on,
+// however slowly the fake bridge starts. vi.waitFor also moves a fake clock on, by its interval on
+// each try, so the limit must be far longer than the waits before it passes.
+function fakeClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+}
+
 describe('HeadlessSession startup', () => {
+  // A test that failed before its limit passed still has it pending: running it stops the bridge.
+  afterEach(() => {
+    if (!vi.isFakeTimers()) return;
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
   it('kills a bridge that never prints its port and reports the limit and its output', async () => {
     const { executable, directory } = await fakeJava([
       'echo "JVM warming up"',
       'echo "still loading classes" >&2',
       'sleep 60 &',
       'echo "$$ $!" > "$(dirname "$0")/pids"',
+      'touch "$(dirname "$0")/printed"',
       'wait',
     ]);
 
-    const attempt = startBridge(executable, 1_500);
+    fakeClock();
+
+    const attempt = startBridge(executable, 60_000);
+    await vi.waitFor(() => access(join(directory, 'printed')), { timeout: 10_000 });
+    // Both lines are in the pipes before the marker exists; one turn of the event loop reads them.
+    await new Promise((done) => setImmediate(done));
+    vi.advanceTimersToNextTimer();
 
     await expect(attempt).rejects.toThrow(RarsError);
     await expect(attempt).rejects.toMatchObject({
       code: 'BRIDGE_START_TIMEOUT',
-      message: expect.stringMatching(/^RARS bridge did not start within 1500 ms\n[\s\S]*JVM warming up[\s\S]*still loading classes/),
-      details: { timeoutMs: 1_500, stdout: 'JVM warming up\n', stderr: 'still loading classes\n' },
+      message: expect.stringMatching(/^RARS bridge did not start within 60000 ms\n[\s\S]*JVM warming up[\s\S]*still loading classes/),
+      details: { timeoutMs: 60_000, stdout: 'JVM warming up\n', stderr: 'still loading classes\n' },
     });
     await expectStopped(await recordedPids(directory));
   }, 15_000);
@@ -100,8 +121,13 @@ describe('HeadlessSession startup', () => {
 
   it('counts the wait for the hello reply against the same limit', async () => {
     const connections: Socket[] = [];
-    // Accepts the bridge connection and never answers it.
-    const silent = createServer((socket) => connections.push(socket));
+    let received = '';
+    // Accepts the bridge connection, reads what it is sent and never answers it.
+    const silent = createServer((socket) => {
+      connections.push(socket);
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => { received += chunk; });
+    });
     await new Promise<void>((done) => silent.listen(0, '127.0.0.1', done));
     const { port } = silent.address() as AddressInfo;
     const { executable, directory } = await fakeJava([
@@ -110,10 +136,17 @@ describe('HeadlessSession startup', () => {
       'exec sleep 60',
     ]);
 
+    fakeClock();
+
     try {
-      await expect(startBridge(executable, 1_500)).rejects.toMatchObject({
+      const attempt = startBridge(executable, 60_000);
+      await vi.waitFor(() => expect(received).toContain('"command":"hello"'), { timeout: 10_000 });
+      // The startup limit was set before the timeout of the hello request, so it passes first.
+      vi.advanceTimersToNextTimer();
+
+      await expect(attempt).rejects.toMatchObject({
         code: 'BRIDGE_START_TIMEOUT',
-        message: expect.stringMatching(new RegExp(`^RARS bridge did not start within 1500 ms\\n[\\s\\S]*RARS_MCP_PORT=${port}`)),
+        message: expect.stringMatching(new RegExp(`^RARS bridge did not start within 60000 ms\\n[\\s\\S]*RARS_MCP_PORT=${port}`)),
       });
       await expectStopped(await recordedPids(directory));
     } finally {
