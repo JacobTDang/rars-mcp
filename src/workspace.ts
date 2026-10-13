@@ -1,5 +1,5 @@
-import { realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { RarsError } from './errors.js';
 
@@ -18,6 +18,15 @@ interface Roots {
 function contains(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot);
+}
+
+async function isSymlink(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 export class Workspace {
@@ -81,6 +90,7 @@ export class Workspace {
     }
 
     let canonicalCandidate: string;
+    let missing = false;
     try {
       canonicalCandidate = await realpath(candidate);
     } catch (error) {
@@ -91,12 +101,19 @@ export class Workspace {
         });
       }
 
-      const canonicalParent = await realpath(dirname(candidate));
-      canonicalCandidate = join(canonicalParent, candidate.slice(dirname(candidate).length + 1));
+      // The folder must exist; resolving it also catches a folder symlink that leads out.
+      canonicalCandidate = join(await realpath(dirname(candidate)), basename(candidate));
+      missing = true;
     }
 
     const canonicalRoots = [...this.roots, ...provided.canonical];
     if (!canonicalRoots.some((root) => contains(root, canonicalCandidate))) this.outside(requestedPath);
+    // A symlink whose target does not exist is refused: whatever writes the file would follow it there.
+    if (missing && await isSymlink(canonicalCandidate)) {
+      throw new RarsError('PATH_IS_SYMLINK', `Workspace output path is a symlink whose target does not exist: ${requestedPath}`, {
+        path: requestedPath,
+      });
+    }
     return canonicalCandidate;
   }
 

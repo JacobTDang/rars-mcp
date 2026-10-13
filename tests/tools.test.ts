@@ -1,4 +1,4 @@
-import { access, copyFile, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, readdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -333,6 +333,23 @@ describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
     expect(result.structuredContent).toMatchObject({
       dumps: [{ segment: '.text', format: 'HexText', file: join(await realpath(root), 'imem.hex') }],
     });
+  });
+
+  it('refuses a rars_run dump file that is a dangling symlink leading out of the workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const outside = await mkdtemp(join(tmpdir(), 'rars-outside-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    await symlink(join(outside, 'escaped.hex'), join(root, 'link.hex'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    await expect(handlers.run({
+      files: ['hello.asm'],
+      dump: [{ segment: '.text', format: 'HexText', file: 'link.hex' }],
+    })).rejects.toThrow('Workspace output path is a symlink whose target does not exist: link.hex');
+    expect(await readdir(outside)).toEqual([]);
   });
 
   it('rejects a dump format RARS does not accept', async () => {

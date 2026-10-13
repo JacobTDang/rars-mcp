@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -469,6 +469,18 @@ describe.runIf(simulatorAvailable())('VHDL tools with nvc', () => {
     await expect(handlers.run({
       testbench: 'half_adder_tb', files: ['half_adder.vhd', 'half_adder_tb.vhd'], wave: { file: '../escape.vcd' },
     })).rejects.toThrow('outside the configured workspace folders');
+  });
+
+  it('refuses a wave file that is a dangling symlink leading out of the workspace', async () => {
+    const root = await workspaceWith(['half_adder.vhd', 'half_adder_tb.vhd']);
+    const outside = await mkdtemp(join(tmpdir(), 'vhdl-outside-'));
+    await symlink(join(outside, 'escaped.vcd'), join(root, 'link.vcd'));
+    const handlers = await handlersFor(root);
+
+    await expect(handlers.run({
+      testbench: 'half_adder_tb', files: ['half_adder.vhd', 'half_adder_tb.vhd'], wave: { file: 'link.vcd' },
+    })).rejects.toThrow('Workspace output path is a symlink whose target does not exist: link.vcd');
+    expect(await readdir(outside)).toEqual([]);
   });
 
   it('kills a run that passes the wall-clock limit', async () => {
