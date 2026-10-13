@@ -1,7 +1,7 @@
 import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
-import { argumentRejected, assemblyFailed, extractDumps, extractInstructionCount } from '../rars/output.js';
+import { argumentRejected, assemblyFailed, extractDumps, extractInstructionCount, stepLimitReached } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand, InstructionWindow } from '../sessions/types.js';
 import type { VhdlSimulator } from '../vhdl/simulator.js';
@@ -160,17 +160,23 @@ export function createToolHandlers(deps: ToolDependencies) {
       const output = { ...dumped, ...counted };
       const diagnostics = parseDiagnostics(output.stderr);
       const failed = rejected || result.exitCode !== 0 || diagnostics.some((item) => item.severity === 'error');
-      const isError = failed || result.timedOut || result.truncated || unwrittenDumps.length > 0;
+      // RARS exits 0 when it stops a run at its step limit, though the program did not finish.
+      const stepLimit = finished && runInput.maxSteps !== undefined && stepLimitReached(result.stderr, runInput.maxSteps);
+      const isError = failed || stepLimit || result.timedOut || result.truncated || unwrittenDumps.length > 0;
       const action = mode === 'assemble' || assemblyFailed(result.stderr) ? 'Assembly' : 'Execution';
       const outcome = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
         result.truncated ? `${action} output exceeded its limit` :
-        failed ? `${action} failed` : `${action} completed`;
+        failed ? `${action} failed` :
+        stepLimit ? `${action} stopped at the step limit of ${runInput.maxSteps}` : `${action} completed`;
       const summary = unwrittenDumps.length === 0 ? outcome :
-        `${outcome}${failed ? ', and' : ', but'} RARS wrote no file for ${unwrittenDumps.join(', ')}`;
+        `${outcome}${failed || stepLimit ? ', and' : ', but'} RARS wrote no file for ${unwrittenDumps.join(', ')}`;
       const text = isError ? [summary, ...formatErrorDetails(output.stderr, diagnostics)].join('\n') : summary;
       return {
         content: [{ type: 'text', text }],
-        structuredContent: { ...result, ...output, diagnostics, ...(dumpOutput.length ? { dumps: dumpOutput } : {}) },
+        structuredContent: {
+          ...result, ...output, ...(mode === 'run' ? { stepLimitReached: stepLimit } : {}), diagnostics,
+          ...(dumpOutput.length ? { dumps: dumpOutput } : {}),
+        },
         ...(isError ? { isError: true } : {}),
       };
     } finally {

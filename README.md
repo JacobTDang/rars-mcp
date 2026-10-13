@@ -70,8 +70,10 @@ path, because writing through it would create its target. Folders come from, in 
   `ucause`, `utval`, `uip`, `cycle`, `time`, `instret`, `cycleh`, `timeh` and `instreth`. The RARS
   command line cannot print `pc`; read it with `rars_inspect`. `memoryRanges` takes word-aligned
   ranges such as `0x10010000-0x1001000c`, both ends included. `maxSteps` and `timeoutMs` are at
-  most 2147483647. Requested registers and memory come back as structured values, not raw RARS
-  text:
+  most 2147483647. A run that stops at `maxSteps` did not finish, so the reply is an error with
+  `stepLimitReached: true` and the summary `Execution stopped at the step limit of N`; it still
+  has the registers, memory, dumps and instruction count. Requested registers and memory come back
+  as structured values, not raw RARS text:
 
   ```json
   { "registers": { "t0": { "hex": "0xfffff000", "signed": -4096 } },
