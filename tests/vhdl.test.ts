@@ -150,6 +150,13 @@ describe('createNvcSimulator', () => {
     await expect(vhdl.compile({ files: [join(fixtures, 'half_adder.vhd')], std: '08', work: 'work' }, {
       timeoutMs: 5000, maxOutputBytes: 1024,
     })).rejects.toThrow('VHDL simulator not found: /nonexistent/nvc');
+    await expect(vhdl.version({ timeoutMs: 5000, maxOutputBytes: 1024 })).rejects.toThrow('VHDL simulator not found: /nonexistent/nvc');
+  });
+
+  it('names itself and the executable it runs', () => {
+    const vhdl = createNvcSimulator({ executable: '/opt/nvc/bin/nvc' });
+
+    expect({ name: vhdl.name, executable: vhdl.executable }).toEqual({ name: 'nvc', executable: '/opt/nvc/bin/nvc' });
   });
 });
 
@@ -162,7 +169,10 @@ describe('vhdl_run replies', () => {
     };
     const handlers = createVhdlHandlers({
       workspace: await Workspace.create(root),
-      vhdl: { compile: async () => failure, run: async () => failure },
+      vhdl: {
+        name: 'fake', executable: 'fake-simulator', version: async () => { throw new Error('vhdl_run never reads the version'); },
+        compile: async () => failure, run: async () => failure,
+      },
       timeoutMs: 1000, maxOutputBytes: 1024,
     });
 
@@ -256,6 +266,12 @@ describe('VHDL tools on the MCP server', () => {
 });
 
 describe.runIf(simulatorAvailable())('VHDL tools with nvc', () => {
+  it('reads the version nvc reports', async () => {
+    const version = await createNvcSimulator({ executable: simulator }).version({ timeoutMs: 10_000, maxOutputBytes: 64 * 1024 });
+
+    expect(version).toMatch(/^\d+\.\d+/);
+  });
+
   it('compiles correct files', async () => {
     const root = await workspaceWith(['half_adder.vhd', 'half_adder_tb.vhd']);
     const handlers = await handlersFor(root);

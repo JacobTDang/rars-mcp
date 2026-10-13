@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { access, constants, stat } from 'node:fs/promises';
+import { delimiter, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { z } from 'zod';
@@ -80,6 +81,86 @@ async function checkWorkspace(deps: ToolDependencies): Promise<Checked<{ roots: 
   }
 }
 
+async function isExecutableFile(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK);
+    return (await stat(path)).isFile();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES') return false;
+    throw error;
+  }
+}
+
+// Where a spawn finds the executable: the name itself when it holds a slash, else the first match on PATH.
+async function findExecutable(executable: string): Promise<string | undefined> {
+  const candidates = executable.includes('/') || executable.includes(sep)
+    ? [resolve(executable)]
+    : (process.env.PATH ?? '').split(delimiter).filter((folder) => folder !== '').map((folder) => resolve(folder, executable));
+  for (const candidate of candidates) {
+    if (await isExecutableFile(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+interface ExecutableStatus {
+  executable: string | null;
+  path?: string;
+  found: boolean;
+  version?: string;
+  envVar: string;
+}
+
+async function checkExecutable(
+  executable: string, envVar: string, notFound: string, readVersion: () => Promise<string>,
+): Promise<Checked<ExecutableStatus>> {
+  let path: string | undefined;
+  try {
+    path = await findExecutable(executable);
+    if (path === undefined) return { executable, found: false, envVar, error: notFound };
+    return { executable, path, found: true, version: await readVersion(), envVar };
+  } catch (error) {
+    return { executable, ...(path === undefined ? {} : { path }), found: path !== undefined, envVar, error: message(error) };
+  }
+}
+
+// tclsh takes no script on its command line, so the script goes in on stdin.
+async function tclVersion(executable: string, timeoutMs: number): Promise<string> {
+  let stdinError: Error | undefined;
+  const running = execFileAsync(executable, [], { timeout: timeoutMs });
+  // A shell that exits without reading its script fails this write; its exit status is the better error.
+  running.child.stdin!.on('error', (error) => { stdinError ??= error; });
+  running.child.stdin!.end('puts [info patchlevel]\n');
+  const { stdout } = await running;
+  if (stdinError !== undefined) throw stdinError;
+  const version = stdout.trim();
+  if (!/^\d+\.\d+\S*$/.test(version)) throw new Error(`Unrecognised Tcl version from ${executable}: ${version.slice(0, 200)}`);
+  return version;
+}
+
+async function checkTclsh(deps: ToolDependencies): Promise<Checked<ExecutableStatus>> {
+  const envVar = 'TCLSH';
+  const executable = deps.tclshExecutable;
+  if (executable === undefined) return { executable: null, found: false, envVar, error: 'The Tcl shell is not configured' };
+  return checkExecutable(
+    executable, envVar, `Tcl shell not found: ${executable}. Install Tcl or set TCLSH`, () => tclVersion(executable, deps.timeoutMs),
+  );
+}
+
+async function checkVhdl(deps: ToolDependencies): Promise<Checked<{ simulator: string | null } & ExecutableStatus>> {
+  const envVar = 'VHDL_SIMULATOR';
+  const vhdl = deps.vhdl;
+  if (vhdl === undefined) {
+    return { simulator: null, executable: null, found: false, envVar, error: 'VHDL simulator is not configured' };
+  }
+  const limits = { timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes };
+  const status = await checkExecutable(
+    vhdl.executable, envVar, `VHDL simulator not found: ${vhdl.executable}. Install ${vhdl.name} or set VHDL_SIMULATOR`,
+    () => vhdl.version(limits),
+  );
+  return { simulator: vhdl.name, ...status };
+}
+
 function checkLive(deps: ToolDependencies): Checked<{ discoveryDir: string | null; configured: boolean }> {
   const discoveryDir = deps.liveDiscoveryDir ?? null;
   const configured = Boolean(deps.liveDiscoveryDir && deps.bridgeHost);
@@ -92,8 +173,8 @@ function line(name: string, error: string | undefined, detail: string): string {
 
 export function createStatusHandler(deps: ToolDependencies) {
   return async (_input: Record<string, never> = {}): Promise<ToolResult> => {
-    const [rars, java, bridge, workspace] = await Promise.all([
-      checkRars(deps), checkJava(deps), checkBridge(deps), checkWorkspace(deps),
+    const [rars, java, bridge, workspace, tclsh, vhdl] = await Promise.all([
+      checkRars(deps), checkJava(deps), checkBridge(deps), checkWorkspace(deps), checkTclsh(deps), checkVhdl(deps),
     ]);
     const sessions = { count: deps.sessions.size };
     const live = checkLive(deps);
@@ -105,7 +186,12 @@ export function createStatusHandler(deps: ToolDependencies) {
       line('workspace', workspace.error, `${workspace.roots.join(', ')}${clientRoots}`),
       line('sessions', undefined, `${sessions.count} open`),
       line('live', live.error, `${live.discoveryDir}`),
+      line('tclsh', tclsh.error, `Tcl ${tclsh.version}, ${tclsh.path}`),
+      line('vhdl', vhdl.error, `${vhdl.simulator} ${vhdl.version}, ${vhdl.path}`),
     ].join('\n');
-    return { content: [{ type: 'text', text }], structuredContent: { rars, java, bridge, workspace, sessions, live } };
+    return {
+      content: [{ type: 'text', text }],
+      structuredContent: { rars, java, bridge, workspace, sessions, live, tclsh, vhdl },
+    };
   };
 }

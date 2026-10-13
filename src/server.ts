@@ -45,7 +45,8 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     inputSchema: closeSessionSchema,
   }, handlers.sessionClose);
   server.registerTool('rars_status', {
-    description: 'Report the RARS and Java versions, bridge, workspace folders, and open sessions without running a program.',
+    description: 'Report the RARS and Java versions, bridge, workspace folders, open sessions, and the tclsh and VHDL simulator '
+      + 'the VHDL tools use, without running a program.',
     inputSchema: statusSchema,
   }, createStatusHandler(dependencies));
   server.registerTool('rars_debug_start', {

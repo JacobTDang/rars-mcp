@@ -59,6 +59,10 @@ export interface VhdlRunResult extends VhdlCompileResult {
 
 // One implementation per simulator; nvc is the only one so far.
 export interface VhdlSimulator {
+  readonly name: string;
+  // As configured, so it may be a bare name looked up on PATH.
+  readonly executable: string;
+  version(limits: VhdlLimits): Promise<string>;
   compile(request: VhdlCompileRequest, limits: VhdlLimits): Promise<VhdlCompileResult>;
   run(request: VhdlRunRequest, limits: VhdlLimits): Promise<VhdlRunResult>;
 }

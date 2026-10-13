@@ -50,7 +50,10 @@ outside them is refused. Folders come from, in order:
 ## Tools
 
 - **`rars_status`** — check the setup without writing a program: RARS and Java versions, the bridge
-  JAR, workspace folders and client roots, and open sessions. Each missing piece is reported in its own field.
+  JAR, workspace folders and client roots, open sessions, and the `tclsh` used by `do_file_check` and
+  the VHDL simulator. For `tclsh` and the simulator it gives the executable, where it was found on
+  `PATH`, its version, and the variable that selects it (`TCLSH`, `VHDL_SIMULATOR`). Each missing
+  piece is reported in its own field.
 
 ### Running programs
 
