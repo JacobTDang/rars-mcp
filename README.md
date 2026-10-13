@@ -107,8 +107,9 @@ configured. Range bounds, `address`, and a label's address must be multiples of 
 cannot end past `0xffffffff`; RARS refuses either dump. `words` is at most 65536. `format` is one
 of `SegmentWindow`, `HexText`, `AsciiText`, `HEX`, `Binary`, `BinaryText`. With `rars_assemble`
 the image is produced without running the program. For file-backed dumps, the target folder must
-already exist. When RARS writes no file for a dump, the reply is an error that keeps the run's
-results and quotes RARS's reason.
+already exist. RARS writes the dumps even when the program then fails, so a run that ends in a
+runtime exception still returns them. When RARS writes no file for a dump, the reply is an error
+that keeps the run's results, names the dump and quotes RARS's reason.
 
 ### Encoding instructions
 

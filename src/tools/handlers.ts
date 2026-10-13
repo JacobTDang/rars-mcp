@@ -1,7 +1,7 @@
 import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
-import { argumentRejected, extractDumps, extractInstructionCount } from '../rars/output.js';
+import { argumentRejected, assemblyFailed, extractDumps, extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand, InstructionWindow } from '../sessions/types.js';
 import type { VhdlSimulator } from '../vhdl/simulator.js';
@@ -81,6 +81,12 @@ async function resolveDumps(
   });
 }
 
+// A killed or cut-off run never reaches the point where RARS prints the count and writes the dumps,
+// and RARS runs nothing when it refuses an argument.
+function runFinished(result: CliResult): boolean {
+  return !result.timedOut && !result.truncated && !argumentRejected(result.stderr);
+}
+
 export function createToolHandlers(deps: ToolDependencies) {
   const execute = async (input: AssembleInput | RunInput, mode: 'assemble' | 'run'): Promise<ToolResult> => {
     const runInput = input as RunInput;
@@ -118,18 +124,16 @@ export function createToolHandlers(deps: ToolDependencies) {
         });
         // RARS names the file of a dump it could not write, and a temporary path means nothing to the caller.
         result = { ...ran, stderr: preparedDumps.remapText(ran.stderr) };
-        const failed = result.exitCode !== 0 || result.timedOut || result.truncated || argumentRejected(result.stderr) ||
-          parseDiagnostics(result.stderr).some((diagnostic) => diagnostic.severity === 'error');
-        // RARS still exits 0 when it cannot write a dump; its reason is on stderr.
-        unwrittenDumps = failed ? [] : await preparedDumps.unwritten();
-        dumpOutput = await preparedDumps.read(!failed && unwrittenDumps.length === 0);
+        // RARS writes the dumps once the program has assembled, even when the run then fails, and prints
+        // its reason for each one it cannot write.
+        const dumpsWritten = runFinished(result) && !assemblyFailed(result.stderr);
+        unwrittenDumps = dumpsWritten ? await preparedDumps.unwritten() : [];
+        dumpOutput = await preparedDumps.read(dumpsWritten);
       } finally {
         await preparedDumps.cleanup();
       }
-      // A killed or cut-off run never reaches the point where RARS prints the count and dumps, and RARS
-      // runs nothing when it refuses an argument.
       const rejected = argumentRejected(result.stderr);
-      const finished = !result.timedOut && !result.truncated && !rejected;
+      const finished = runFinished(result);
       const dumpsRequested = runInput.registers !== undefined || runInput.memoryRanges !== undefined;
       const dumped = finished && dumpsRequested ? extractDumps(result.stderr) : { stderr: result.stderr };
       const counted = finished && runInput.instructionCount ? extractInstructionCount(dumped.stderr) : {};
@@ -138,14 +142,14 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...diagnostic,
         ...(diagnostic.file === undefined || source === undefined ? {} : { file: source.remapFile(diagnostic.file) }),
       }));
-      const isError = rejected || result.exitCode !== 0 || result.timedOut || result.truncated ||
-        diagnostics.some((item) => item.severity === 'error') || unwrittenDumps.length > 0;
+      const failed = rejected || result.exitCode !== 0 || diagnostics.some((item) => item.severity === 'error');
+      const isError = failed || result.timedOut || result.truncated || unwrittenDumps.length > 0;
       const action = mode === 'assemble' ? 'Assembly' : 'Execution';
-      const summary = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
+      const outcome = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
         result.truncated ? `${action} output exceeded its limit` :
-        // Dumps are only checked after a run that succeeded, so its results stand.
-        unwrittenDumps.length ? `${action} completed, but RARS wrote no file for ${unwrittenDumps.join(', ')}` :
-        isError ? `${action} failed` : `${action} completed`;
+        failed ? `${action} failed` : `${action} completed`;
+      const summary = unwrittenDumps.length === 0 ? outcome :
+        `${outcome}${failed ? ', and' : ', but'} RARS wrote no file for ${unwrittenDumps.join(', ')}`;
       const text = isError ? [summary, ...formatErrorDetails(output.stderr, diagnostics)].join('\n') : summary;
       return {
         content: [{ type: 'text', text }],

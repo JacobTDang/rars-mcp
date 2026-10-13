@@ -293,6 +293,76 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
     expect(JSON.stringify(result)).not.toContain(dumpFile!);
   });
 
+  // Stores 77 at slot, then faults on line 8.
+  const storesThenFaults = '.data\nslot: .word 0\n.text\nmain:\n  li t0, 77\n  la t1, slot\n  sw t0, 0(t1)\n'
+    + '  lw t2, 1(zero)\n  li a7, 10\n  ecall\n';
+  const faultText = 'inline.s:8: Runtime exception at 0x00400010: Load address not aligned to word boundary 0x00000001\n'
+    + 'Simulation terminated due to errors.';
+
+  it('returns the dumps RARS wrote before the program faulted, inline and to a workspace file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+      bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const result = await handlers.run({
+      source: storesThenFaults,
+      dump: [
+        { segment: { label: 'slot', words: 1 }, format: 'HexText' },
+        { segment: { label: 'slot', words: 1 }, format: 'HexText', file: 'slot.hex' },
+      ],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: `Execution failed\n${faultText}` }]);
+    expect(result.structuredContent).toMatchObject({
+      dumps: [{ words: ['0x0000004d'] }, { file: join(await realpath(root), 'slot.hex') }],
+    });
+    expect(await readFile(join(root, 'slot.hex'), 'utf8')).toBe('0000004d\n');
+  });
+
+  it('names the dump RARS wrote no file for after the program faulted, and why', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      source: storesThenFaults,
+      dump: [
+        { segment: { address: '0x10010000', words: 1 }, format: 'HexText' },
+        { segment: { address: '0x10040000', words: 2 }, format: 'HexText' },
+      ],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed, and RARS wrote no file for dump[1] (0x10040000-0x10040008)\n'
+        + `${faultText}\nThis segment has not been written to, there is nothing to dump.`,
+    }]);
+    expect(result.structuredContent).toMatchObject({ dumps: [{ words: ['0x0000004d'] }, { format: 'HexText' }] });
+    expect(result.structuredContent).not.toHaveProperty('dumps.1.text');
+  });
+
+  it('lists no unwritten dumps when the program does not assemble', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.assemble({
+      source: '.text\nmain:\n  bogus a0\n', dump: [{ segment: '.text', format: 'HexText' }],
+    });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { dumps: [{ segment: '.text', format: 'HexText' }] } });
+    expect(result.content).toEqual([{ type: 'text', text: 'Assembly failed\ninline.s:3:3: "bogus" is not a recognized operator' }]);
+  });
+
   it('reports a workspace dump file that RARS did not write', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
@@ -686,6 +756,76 @@ describe('headless tool handlers', () => {
         + 'Program terminated by calling exit\nError while attempting to save dump, file dump[0] was not found!',
     }]);
     expect(JSON.stringify(result)).not.toMatch(/ENOENT|rars-dumps-/);
+  });
+
+  it('returns each inline dump RARS wrote when it wrote no file for another', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async (options) => {
+        await writeFile(options.request.dumps![0]!.file, '00000001\n');
+        return {
+          exitCode: 0, signal: null, stdout: '',
+          stderr: '\nProgram terminated by calling exit\nThis segment has not been written to, there is nothing to dump.\n',
+          timedOut: false, truncated: false,
+        };
+      },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['prog.s'], dump: [{ segment: '.data', format: 'HexText' }, { segment: '0x10040000-0x10040008', format: 'HexText' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringMatching(/^Execution completed, but RARS wrote no file for dump\[1\] \(0x10040000-0x10040008\)\n/),
+    });
+    expect(result.structuredContent).toMatchObject({ dumps: [{ words: ['0x00000001'] }, { format: 'HexText' }] });
+    expect(result.structuredContent).not.toHaveProperty('dumps.1.text');
+  });
+
+  it('returns an inline dump RARS wrote though the program then failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async (options) => {
+        await writeFile(options.request.dumps![0]!.file, '0000004d\n');
+        return {
+          exitCode: 0, signal: null, stdout: '',
+          stderr: `Error in ${join(root, 'prog.s')} line 4: Runtime exception at 0x00400008: address out of range 0x00000000\n\n`
+            + 'Simulation terminated due to errors.\n',
+          timedOut: false, truncated: false,
+        };
+      },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['prog.s'], dump: [{ segment: '.data', format: 'HexText' }] });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { dumps: [{ words: ['0x0000004d'] }] } });
+    expect(result.content[0]).toMatchObject({ text: expect.stringMatching(/^Execution failed\n/) });
+  });
+
+  it('reads no inline dump from a run that timed out', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async (options) => {
+        await writeFile(options.request.dumps![0]!.file, '0000');
+        return { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, truncated: false };
+      },
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['prog.s'], dump: [{ segment: '.data', format: 'HexText' }] });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { dumps: [{ segment: '.data', format: 'HexText' }] } });
+    expect(result.structuredContent).not.toHaveProperty('dumps.0.text');
+    expect(result.content).toEqual([{ type: 'text', text: 'Execution timed out after 1000 ms' }]);
   });
 
   it.each<[{ address: string; words: number }, string]>([
