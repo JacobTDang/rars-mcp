@@ -1,7 +1,7 @@
 import type { CliResult, RunRarsOptions } from '../rars/cli.js';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { parseDiagnostics } from '../rars/diagnostics.js';
-import { extractDumps, extractInstructionCount } from '../rars/output.js';
+import { argumentRejected, extractDumps, extractInstructionCount } from '../rars/output.js';
 import type { SessionStore } from '../sessions/store.js';
 import type { DebugCommand, InstructionWindow } from '../sessions/types.js';
 import type { VhdlSimulator } from '../vhdl/simulator.js';
@@ -118,7 +118,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         });
         // RARS names the file of a dump it could not write, and a temporary path means nothing to the caller.
         result = { ...ran, stderr: preparedDumps.remapText(ran.stderr) };
-        const failed = result.exitCode !== 0 || result.timedOut || result.truncated ||
+        const failed = result.exitCode !== 0 || result.timedOut || result.truncated || argumentRejected(result.stderr) ||
           parseDiagnostics(result.stderr).some((diagnostic) => diagnostic.severity === 'error');
         // RARS still exits 0 when it cannot write a dump; its reason is on stderr.
         unwrittenDumps = failed ? [] : await preparedDumps.unwritten();
@@ -126,8 +126,10 @@ export function createToolHandlers(deps: ToolDependencies) {
       } finally {
         await preparedDumps.cleanup();
       }
-      // A killed or cut-off run never reaches the point where RARS prints the count and dumps.
-      const finished = !result.timedOut && !result.truncated;
+      // A killed or cut-off run never reaches the point where RARS prints the count and dumps, and RARS
+      // runs nothing when it refuses an argument.
+      const rejected = argumentRejected(result.stderr);
+      const finished = !result.timedOut && !result.truncated && !rejected;
       const dumpsRequested = runInput.registers !== undefined || runInput.memoryRanges !== undefined;
       const dumped = finished && dumpsRequested ? extractDumps(result.stderr) : { stderr: result.stderr };
       const counted = finished && runInput.instructionCount ? extractInstructionCount(dumped.stderr) : {};
@@ -136,7 +138,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...diagnostic,
         ...(diagnostic.file === undefined || source === undefined ? {} : { file: source.remapFile(diagnostic.file) }),
       }));
-      const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
+      const isError = rejected || result.exitCode !== 0 || result.timedOut || result.truncated ||
         diagnostics.some((item) => item.severity === 'error') || unwrittenDumps.length > 0;
       const action = mode === 'assemble' ? 'Assembly' : 'Execution';
       const summary = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :

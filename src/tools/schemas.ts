@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { CLI_REGISTER_FORMS, memoryRangeProblem, registerProblem } from '../rars/cli.js';
+
 // zod reports a union whose every option fails as just "Invalid input", which hides a misspelt key.
 // A key none of these objects takes, in the input or in the objects of an input array, is named
 // instead, as a strict object names it.
@@ -75,14 +77,22 @@ export const assembleSchema = z.strictObject({
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);
 
+// A string the check passes; otherwise the check's message, which names the entry, is the issue.
+const checkedString = (problem: (value: string) => string | undefined) => z.string().superRefine((value, context) => {
+  const message = problem(value);
+  if (message !== undefined) context.addIssue({ code: 'custom', message });
+});
+
 export const runSchema = z.strictObject({
   ...sourceSelection,
   stdin: z.string().optional(),
   programArgs: z.array(z.string()).optional(),
   maxSteps: z.number().int().positive().optional(),
   instructionCount: z.boolean().optional(),
-  registers: z.array(z.string()).optional(),
-  memoryRanges: z.array(z.string()).optional(),
+  registers: z.array(checkedString(registerProblem))
+    .describe(`Registers to print after the run: ${CLI_REGISTER_FORMS}. Read pc with rars_inspect`).optional(),
+  memoryRanges: z.array(checkedString(memoryRangeProblem))
+    .describe('Word-aligned address ranges to print after the run, both ends included, such as 0x10010000-0x1001000c').optional(),
   timeoutMs: z.number().int().positive().optional(),
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);

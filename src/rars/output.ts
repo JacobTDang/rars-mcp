@@ -29,6 +29,13 @@ function word(hex: string): Word {
 // RARS prints this instead of running the program when assembly fails.
 const ASSEMBLY_FAILED = 'Processing terminated due to errors.';
 
+// RARS prints one of these, and runs nothing, for a command line argument it does not take.
+const REJECTED_ARGUMENT = /^(?:Invalid Command Argument|Invalid\/unaligned address or invalid range): /m;
+
+export function argumentRejected(stderr: string): boolean {
+  return REJECTED_ARGUMENT.test(stderr);
+}
+
 // With the ic option, RARS prints the count on its own line just above any register or memory dump.
 export function extractInstructionCount(stderr: string): { instructionCount?: number; stderr: string } {
   if (stderr.includes(ASSEMBLY_FAILED)) return { stderr };
