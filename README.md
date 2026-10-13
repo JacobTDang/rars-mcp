@@ -145,7 +145,10 @@ results and quotes RARS's reason.
     no instruction, as after the program exits: the window then ends at the last instruction below
     `pc`, so `instructions: {}` shows the program's last 10.
   - `includeInstructions: true` still returns the whole program, but is deprecated.
-- **`rars_modify`** — write registers or memory.
+- **`rars_modify`** — write registers or memory. Values are decimal or `0x` hex, signed or unsigned,
+  and must fit the register or the `width`. Every register name, address, alignment and value is
+  checked before anything is written, so a rejected request changes nothing. An 8-byte write must
+  start on a word boundary, as an 8-byte read must.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.
 

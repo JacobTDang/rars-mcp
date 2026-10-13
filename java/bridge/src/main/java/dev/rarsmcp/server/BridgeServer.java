@@ -14,6 +14,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,15 +123,11 @@ public final class BridgeServer {
                 return BridgeResponse.success(request.id, result);
             }
             case "modify":
-                Object registerObject = payload.get("registers");
-                if (registerObject instanceof Map) for (Map.Entry<?, ?> entry : ((Map<?, ?>) registerObject).entrySet()) {
-                    simulator.setRegister(String.valueOf(entry.getKey()), integer(entry.getValue()));
-                }
-                Object writes = payload.get("memory");
-                if (writes instanceof List) for (Object item : (List<?>) writes) {
-                    Map<String, Object> write = (Map<String, Object>) item;
-                    simulator.writeMemory(integer(write.get("address")), integer(write.get("width")), number(write.get("value")));
-                }
+                Object registers = payload.getOrDefault("registers", Collections.emptyMap());
+                Object writes = payload.getOrDefault("memory", Collections.emptyList());
+                if (!(registers instanceof Map)) throw new IllegalArgumentException("registers must be an object");
+                if (!(writes instanceof List)) throw new IllegalArgumentException("memory must be an array");
+                simulator.modify((Map<?, ?>) registers, (List<?>) writes);
                 hooks.afterMutation();
                 return BridgeResponse.success(request.id, simulator.snapshot());
             case "encode":

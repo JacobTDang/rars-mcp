@@ -135,8 +135,11 @@ public final class MiniJson {
             int start = at;
             while (!end() && "-+0123456789.eE".indexOf(source.charAt(at)) >= 0) at++;
             String token = source.substring(start, at);
-            try { return token.contains(".") || token.contains("e") || token.contains("E") ? Double.valueOf(token) : Long.valueOf(token); }
-            catch (NumberFormatException error) { throw new IllegalArgumentException("Invalid number"); }
+            // Not one conditional expression: that would widen the Long to a double.
+            try {
+                if (token.contains(".") || token.contains("e") || token.contains("E")) return Double.valueOf(token);
+                return Long.valueOf(token);
+            } catch (NumberFormatException error) { throw new IllegalArgumentException("Invalid number"); }
         }
         void literal(String expected) {
             if (!source.startsWith(expected, at)) throw new IllegalArgumentException("Invalid literal");
