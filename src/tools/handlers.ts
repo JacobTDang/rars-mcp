@@ -141,12 +141,10 @@ export function createToolHandlers(deps: ToolDependencies) {
       const action = mode === 'assemble' ? 'Assembly' : 'Execution';
       const summary = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
         result.truncated ? `${action} output exceeded its limit` :
+        // Dumps are only checked after a run that succeeded, so its results stand.
+        unwrittenDumps.length ? `${action} completed, but RARS wrote no file for ${unwrittenDumps.join(', ')}` :
         isError ? `${action} failed` : `${action} completed`;
-      const details = [
-        ...formatErrorDetails(output.stderr, diagnostics),
-        ...unwrittenDumps.map((dump) => `RARS wrote no file for ${dump}`),
-      ];
-      const text = isError ? [summary, ...details].join('\n') : summary;
+      const text = isError ? [summary, ...formatErrorDetails(output.stderr, diagnostics)].join('\n') : summary;
       return {
         content: [{ type: 'text', text }],
         structuredContent: { ...result, ...output, diagnostics, ...(dumpOutput.length ? { dumps: dumpOutput } : {}) },

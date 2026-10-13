@@ -15,19 +15,20 @@ function unknownKeyError(...objects: Array<{ shape: Record<string, unknown> }>) 
 }
 
 export const isWordAligned = (address: string): boolean => BigInt(address) % 4n === 0n;
-// RARS refuses a dump range whose bounds are not multiples of 4 and writes no file for it.
-const requireWordAligned = (value: string, context: z.RefinementCtx) => {
+// RARS refuses a dump range whose bounds are not 32-bit multiples of 4 and writes no file for it.
+const requireDumpBounds = (value: string, context: z.RefinementCtx) => {
   for (const address of value.match(/0x[0-9a-f]+/gi) ?? []) {
     if (!isWordAligned(address)) context.addIssue({ code: 'custom', message: `dump address ${address} is not word aligned` });
+    if (BigInt(address) > 0xffffffffn) context.addIssue({ code: 'custom', message: `dump address ${address} is past 0xffffffff` });
   }
 };
 const dumpWordsSchema = z.number().int().positive().max(65_536);
 const labelSegmentSchema = z.strictObject({ label: z.string().min(1), words: dumpWordsSchema });
 const addressSegmentSchema = z.strictObject({
-  address: z.string().regex(/^0x[0-9a-fA-F]+$/).superRefine(requireWordAligned), words: dumpWordsSchema,
+  address: z.string().regex(/^0x[0-9a-fA-F]+$/).superRefine(requireDumpBounds), words: dumpWordsSchema,
 });
 const dumpSegmentSchema = z.union([
-  z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/).superRefine(requireWordAligned),
+  z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/).superRefine(requireDumpBounds),
   labelSegmentSchema,
   addressSegmentSchema,
 ], { error: unknownKeyError(labelSegmentSchema, addressSegmentSchema) });
