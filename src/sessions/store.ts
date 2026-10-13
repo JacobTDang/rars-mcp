@@ -5,6 +5,7 @@ import type {
   DebugCommand,
   InspectRequest,
   InspectResult,
+  LoadRequest,
   MachineState,
   ModifyRequest,
   SessionBackend,
@@ -34,6 +35,10 @@ class QueuedBackend implements SessionBackend {
 
   modify(request: ModifyRequest): Promise<MachineState> {
     return this.enqueue(() => this.target.modify(request));
+  }
+
+  load(request: LoadRequest): Promise<MachineState> {
+    return this.enqueue(() => this.target.load(request));
   }
 
   close(): Promise<void> {

@@ -957,7 +957,7 @@ describe('headless tool handlers', () => {
     const id = sessions.add({
       summary: async () => ({ kind: 'headless', state: 'paused' }),
       command: async () => ({ status: 'paused' }), inspect: async () => ({ status: 'paused' }),
-      modify: async () => ({ status: 'paused' }), close, onFailure: () => undefined,
+      modify: async () => ({ status: 'paused' }), load: async () => ({ status: 'paused' }), close, onFailure: () => undefined,
     });
     const handlers = createToolHandlers({
       workspace: await Workspace.create(root), sessions,

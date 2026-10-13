@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net';
 
 import { BridgeConnection } from '../sessions/connection.js';
-import type { DebugCommand, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
+import type { DebugCommand, InspectRequest, InspectResult, LoadRequest, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
 
 export interface LiveConnectionOptions { host: string; port: number; token: string; directory?: string; timeoutMs: number }
 
@@ -52,8 +52,8 @@ export class LiveClient implements SessionBackend {
   async modify(request: ModifyRequest): Promise<MachineState> {
     const result = await this.request('modify', { registers: request.registers ?? {}, memory: request.memory ?? [] }); this.update(result); return result as unknown as MachineState;
   }
-  async load(payload: { files: string[]; programArgs?: string[]; stdin?: string; conflictPolicy: 'reject' | 'discard' }): Promise<Record<string, unknown>> {
-    const result = await this.request('load', payload); this.update(result); return result;
+  async load(request: LoadRequest): Promise<MachineState> {
+    const result = await this.request('load', { ...request }); this.update(result); return result as unknown as MachineState;
   }
   async close(): Promise<void> { this.connection.close('Live RARS session disconnected'); }
   onFailure(listener: (error: Error) => void): void { this.connection.onFailure(listener); }

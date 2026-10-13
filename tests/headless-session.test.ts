@@ -174,6 +174,21 @@ describe('HeadlessSession after startup', () => {
     expect(Date.now() - started).toBeLessThan(100);
   }, 15_000);
 
+  it('refuses to load a program, and still takes requests after', async () => {
+    // The fake bridge answers a load, so a refused load shows the session did not send it.
+    const { executable } = await fakeBridge('answer');
+    const session = await startBridge(executable, 60_000);
+
+    try {
+      await expect(session.load({ files: ['/unused/other.asm'], conflictPolicy: 'reject' })).rejects.toThrow(
+        'Session is not a live RARS session, so it cannot load a program. Start a session for that program with rars_debug_start',
+      );
+      await expect(session.command({ action: 'step' })).resolves.toMatchObject({ stopReason: 'step' });
+    } finally {
+      await session.close();
+    }
+  }, 15_000);
+
   it('pauses a request that timed out, so the session takes the next one', async () => {
     const { executable } = await fakeBridge('pausable');
     const session = await startBridge(executable, 1_000);

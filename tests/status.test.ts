@@ -56,6 +56,7 @@ const fakeBackend: SessionBackend = {
   command: async () => ({ status: 'paused' }),
   inspect: async () => ({ status: 'paused' }),
   modify: async () => ({ status: 'paused' }),
+  load: async () => ({ status: 'paused' }),
   close: async () => undefined,
   onFailure: () => undefined,
 };

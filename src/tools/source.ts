@@ -57,6 +57,7 @@ export function withPreparedSource(target: SessionBackend, source: PreparedSourc
       };
     },
     modify: (request) => target.modify(request),
+    load: (request) => target.load(request),
     onFailure: (listener) => target.onFailure(listener),
     close: async () => {
       try {
