@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -67,5 +67,54 @@ describe('Workspace', () => {
     await expect(workspace.resolve('src/dump.hex', { allowMissing: true })).resolves.toBe(
       join(await realpath(join(fixtureRoot, 'src')), 'dump.hex'),
     );
+  });
+
+  it('refuses a new output that is a dangling symlink leading out of the workspace', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'rars-outside-'));
+    await symlink(join(outside, 'escaped.hex'), join(fixtureRoot, 'link.hex'));
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve('link.hex', { allowMissing: true })).rejects.toMatchObject({
+      code: 'PATH_IS_SYMLINK',
+      message: 'Workspace output path is a symlink whose target does not exist: link.hex',
+    });
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('refuses a new output that is a dangling symlink inside the workspace', async () => {
+    await symlink('missing.hex', join(fixtureRoot, 'src', 'link.hex'));
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve('src/link.hex', { allowMissing: true })).rejects.toMatchObject({
+      code: 'PATH_IS_SYMLINK',
+    });
+  });
+
+  it('refuses a new output that is a symlink loop', async () => {
+    await symlink('loop.hex', join(fixtureRoot, 'loop.hex'));
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve('loop.hex', { allowMissing: true })).rejects.toMatchObject({
+      code: 'PATH_IS_SYMLINK',
+    });
+  });
+
+  it('resolves an output symlink whose target exists inside the workspace to that target', async () => {
+    await symlink(join('src', 'main.asm'), join(fixtureRoot, 'alias.asm'));
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve('alias.asm', { allowMissing: true })).resolves.toBe(
+      await realpath(join(fixtureRoot, 'src', 'main.asm')),
+    );
+  });
+
+  it('refuses a new output beneath a folder symlink that leads out of the workspace', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'rars-outside-'));
+    await symlink(outside, join(fixtureRoot, 'linked'));
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve('linked/new.hex', { allowMissing: true })).rejects.toMatchObject({
+      code: 'PATH_OUTSIDE_WORKSPACE',
+    });
   });
 });

@@ -38,7 +38,9 @@ other clients are in `examples/clients/`.
 ## Which files the server can read
 
 Every path is checked against the workspace folders, after resolving symlinks, and anything
-outside them is refused. Folders come from, in order:
+outside them is refused. An output file that does not exist yet, such as a `dump` or wave `file`,
+must be in an existing folder, and a symlink whose target does not exist is refused as an output
+path, because writing through it would create its target. Folders come from, in order:
 
 - **The client's roots.** A client that advertises the MCP `roots` capability has its roots used
   as workspace folders, so the workspace follows the client's project with no configuration.
