@@ -593,7 +593,7 @@ describe('headless tool handlers', () => {
     const close = vi.fn(async () => undefined);
     const id = sessions.add({
       summary: async () => ({ kind: 'headless', state: 'paused' }),
-      command: async () => ({ status: 'paused' }), inspect: async () => ({}),
+      command: async () => ({ status: 'paused' }), inspect: async () => ({ status: 'paused' }),
       modify: async () => ({ status: 'paused' }), close,
     });
     const handlers = createToolHandlers({

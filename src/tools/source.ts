@@ -46,12 +46,10 @@ export function withPreparedSource(target: SessionBackend, source: PreparedSourc
     command: (command) => target.command(command),
     inspect: async (request) => {
       const result = await target.inspect(request);
-      if (typeof result !== 'object' || result === null || !('instructions' in result)) return result;
-      const instructions = (result as { instructions?: unknown }).instructions;
-      if (!Array.isArray(instructions)) return result;
+      if (result.instructions === undefined) return result;
       return {
         ...result,
-        instructions: instructions.map((instruction: unknown) => {
+        instructions: result.instructions.map((instruction) => {
           if (typeof instruction !== 'object' || instruction === null || !('file' in instruction)) return instruction;
           const file = (instruction as { file?: unknown }).file;
           return typeof file === 'string' ? { ...instruction, file: source.remapFile(file) } : instruction;

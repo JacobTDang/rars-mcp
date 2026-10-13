@@ -25,6 +25,12 @@ public final class ProtocolSelfTest {
     }
 
     private static void words() {
+        // An 8-byte signed value is a decimal string: a JSON number cannot hold every 64-bit value.
+        require(MiniJson.stringify(Words.word(Long.MAX_VALUE, 8)).equals("{\"hex\":\"0x7fffffffffffffff\",\"signed\":\"9223372036854775807\"}"), "largest 8-byte value");
+        require(MiniJson.stringify(Words.word(Long.MIN_VALUE, 8)).equals("{\"hex\":\"0x8000000000000000\",\"signed\":\"-9223372036854775808\"}"), "smallest 8-byte value");
+        require(MiniJson.stringify(Words.word(-2, 8)).equals("{\"hex\":\"0xfffffffffffffffe\",\"signed\":\"-2\"}"), "negative 8-byte value");
+        require(MiniJson.stringify(Words.word(0xd2, 1)).equals("{\"hex\":\"0xd2\",\"signed\":-46}"), "a narrower value stays a number");
+
         require(Words.parseValue("0x7fffffffffffffff", 8, "x") == Long.MAX_VALUE, "8-byte hex");
         require(Words.parseValue("0x8000000000000000", 8, "x") == Long.MIN_VALUE, "8-byte hex above the signed range");
         require(Words.parseValue("18446744073709551615", 8, "x") == -1L, "8-byte unsigned decimal");

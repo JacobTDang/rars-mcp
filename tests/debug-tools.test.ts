@@ -45,6 +45,23 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     await expect(access(sourceFolder!)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('reads a .dword beyond 2^53 exactly', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 3000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const started = await handlers.debugStart({ source: '.data\nbig: .dword 0x7fffffffffffffff\n.text\nmain:\n  li a7, 10\n  ecall\n' });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+    expect((await handlers.inspect({ sessionId, memory: [{ address: '0x10010000', length: 8 }] })).structuredContent).toMatchObject({
+      memory: [{ address: '0x10010000', width: 8, hex: '0x7fffffffffffffff', signed: '9223372036854775807' }],
+    });
+    await handlers.sessionClose({ sessionId });
+  });
+
   it('starts, inspects, mutates, steps, and closes a debug session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
     execFileSync('cp', ['tests/fixtures/debug.asm', join(root, 'debug.asm')]);

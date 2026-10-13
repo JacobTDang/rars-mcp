@@ -182,6 +182,40 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('writes and reads 8-byte memory exactly, with signed as a decimal string', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    await session.modify({
+      memory: [
+        { address: '0x10010000', width: 8, value: '0x7fffffffffffffff' },
+        { address: '0x10010008', width: 8, value: '0x8000000000000000' },
+        { address: '0x10010010', width: 8, value: '-2' },
+        { address: '0x10010018', width: 8, value: '9223372036854775807' },
+      ],
+    });
+    const state = await session.inspect({
+      memory: [
+        { address: '0x10010000', length: 8 }, { address: '0x10010008', length: 8 },
+        { address: '0x10010010', length: 8 }, { address: '0x10010018', length: 8 },
+        { address: '0x10010004', length: 4 },
+      ],
+    });
+    expect(state.memory).toEqual([
+      { address: '0x10010000', width: 8, hex: '0x7fffffffffffffff', signed: '9223372036854775807' },
+      { address: '0x10010008', width: 8, hex: '0x8000000000000000', signed: '-9223372036854775808' },
+      { address: '0x10010010', width: 8, hex: '0xfffffffffffffffe', signed: '-2' },
+      { address: '0x10010018', width: 8, hex: '0x7fffffffffffffff', signed: '9223372036854775807' },
+      { address: '0x10010004', width: 4, hex: '0x7fffffff', signed: 2147483647 },
+    ]);
+    await expect(session.modify({ memory: [{ address: '0x10010000', width: 8, value: '0x10000000000000000' }] }))
+      .rejects.toThrow('Value for 0x10010000 does not fit in 8 bytes: 0x10000000000000000');
+    await session.close();
+  });
+
   it('reports a step-limit stop on continue', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
@@ -229,8 +263,8 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
       files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
     });
 
-    const state = await session.inspect({ registers: ['pc'] }) as { programCounter: string; registers: { pc: { hex: string } } };
-    expect(state.registers.pc.hex).toBe(state.programCounter);
+    const state = await session.inspect({ registers: ['pc'] });
+    expect(state.registers?.pc?.hex).toBe(state.programCounter);
     await expect(session.inspect({ registers: ['nope'] })).rejects.toThrow('Unknown register: nope');
     await session.close();
   });

@@ -4,6 +4,7 @@ import { RarsError } from '../errors.js';
 import type {
   DebugCommand,
   InspectRequest,
+  InspectResult,
   MachineState,
   ModifyRequest,
   SessionBackend,
@@ -25,7 +26,7 @@ class QueuedBackend implements SessionBackend {
     return this.enqueue(() => this.target.command(command));
   }
 
-  inspect(request: InspectRequest): Promise<unknown> {
+  inspect(request: InspectRequest): Promise<InspectResult> {
     return this.enqueue(() => this.target.inspect(request));
   }
 

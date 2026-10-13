@@ -214,7 +214,7 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(request.includeInstructions === undefined ? {} : { includeInstructions: request.includeInstructions }),
         ...(request.instructions === undefined ? {} : { instructions: instructionWindow(request.instructions) }),
       });
-      return { content: [{ type: 'text', text: `Inspected RARS session ${sessionId}` }], structuredContent: result as Record<string, unknown> };
+      return { content: [{ type: 'text', text: `Inspected RARS session ${sessionId}` }], structuredContent: result as unknown as Record<string, unknown> };
     },
     modify: async (input: ModifyInput): Promise<ToolResult> => {
       const { sessionId, ...request } = input;

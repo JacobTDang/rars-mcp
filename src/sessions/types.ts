@@ -9,10 +9,17 @@ export interface SessionSummary {
   name?: string;
 }
 
+// A register, or memory 1, 2 or 4 bytes wide.
 export interface Word {
   hex: string;
   signed: number;
 }
+
+// Memory as inspect reads it; hex is the exact bit pattern. A JSON number cannot hold every
+// 64-bit value, so for 8 bytes signed is a decimal string.
+export type MemoryValue =
+  | { address: string; width: 1 | 2 | 4; hex: string; signed: number }
+  | { address: string; width: 8; hex: string; signed: string };
 
 export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'exited' | 'ran_off_end' | 'exception' | 'backstep' | 'terminated';
 
@@ -42,6 +49,13 @@ export interface InspectRequest {
   instructions?: InstructionWindow;
 }
 
+// The machine state with the registers, memory, symbols and instructions inspect was asked for.
+export interface InspectResult extends MachineState {
+  memory?: readonly MemoryValue[];
+  symbols?: unknown[];
+  instructions?: unknown[];
+}
+
 export interface ModifyRequest {
   registers?: Readonly<Record<string, string>>;
   memory?: ReadonlyArray<{ address: string; value: string; width: 1 | 2 | 4 | 8 }>;
@@ -62,7 +76,7 @@ export type EncodedInstruction =
 export interface SessionBackend {
   summary(): Promise<SessionSummary>;
   command(command: DebugCommand): Promise<MachineState>;
-  inspect(request: InspectRequest): Promise<unknown>;
+  inspect(request: InspectRequest): Promise<InspectResult>;
   modify(request: ModifyRequest): Promise<MachineState>;
   close(): Promise<void>;
 }

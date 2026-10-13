@@ -2,7 +2,7 @@ import { createConnection, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
-import type { DebugCommand, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
+import type { DebugCommand, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
 
 export interface LiveConnectionOptions { host: string; port: number; token: string; directory?: string; timeoutMs: number }
 interface Response { id: string; ok: boolean; result?: Record<string, unknown>; error?: { message: string } }
@@ -41,14 +41,15 @@ export class LiveClient implements SessionBackend {
   async command(command: DebugCommand): Promise<MachineState> {
     const result = await this.request('command', { ...command }); this.update(result); return result as unknown as MachineState;
   }
-  async inspect(request: InspectRequest): Promise<unknown> {
-    return this.request('inspect', {
+  async inspect(request: InspectRequest): Promise<InspectResult> {
+    const result = await this.request('inspect', {
       registers: request.registers ?? [],
       memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
       includeSymbols: request.includeSymbols ?? false,
       includeInstructions: request.includeInstructions ?? false,
       ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
     });
+    return result as unknown as InspectResult;
   }
   async modify(request: ModifyRequest): Promise<MachineState> {
     const result = await this.request('modify', { registers: request.registers ?? {}, memory: request.memory ?? [] }); this.update(result); return result as unknown as MachineState;
