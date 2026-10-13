@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { applyMutation, discoverMutations, type Mutant } from '../vhdl/mutate.js';
 import type { VhdlRunResult } from '../vhdl/simulator.js';
+import { timeoutMsSchema } from './schemas.js';
 import { describeRun, files, identifier, std, stopTime, type VhdlToolDependencies } from './vhdl.js';
 
 // Built-in mutations run every testbench once each, so their number is bounded.
@@ -26,7 +27,7 @@ export const vhdlMutateSchema = z.strictObject({
   })).min(1).describe(`Literal substitutions; without them, one mutation per operator found in the file, up to ${MUTATION_LIMIT}`).optional(),
   std,
   stopTime,
-  timeoutMs: z.number().int().positive().describe('Wall-clock limit for each simulator run, in milliseconds').optional(),
+  timeoutMs: timeoutMsSchema.describe('Wall-clock limit for each simulator run, in milliseconds').optional(),
 });
 
 export type VhdlMutateInput = z.infer<typeof vhdlMutateSchema>;

@@ -7,7 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 
 import { createMcpServer } from '../src/server.js';
-import { createVhdlMutateHandler } from '../src/tools/mutate.js';
+import { createVhdlMutateHandler, vhdlMutateSchema } from '../src/tools/mutate.js';
 import { applyMutation, discoverMutations } from '../src/vhdl/mutate.js';
 import { createNvcSimulator } from '../src/vhdl/nvc.js';
 import type { VhdlLimits, VhdlRunRequest, VhdlRunResult, VhdlSimulator } from '../src/vhdl/simulator.js';
@@ -354,12 +354,14 @@ describe('vhdl_mutate on the MCP server', () => {
       [{ file: 'adder.vhd', testbenches: [bench], mutations: [{ find: '+', replace: '-', occurrence: 0 }] }, 'occurrence'],
       [{ file: 'adder.vhd', testbenches: [bench], stopTime: 'soon' }, 'stopTime'],
       [{ file: 'adder.vhd', testbenches: [bench], timeoutMs: 0 }, 'timeoutMs'],
+      [{ file: 'adder.vhd', testbenches: [bench], timeoutMs: 2147483648 }, 'timeoutMs: must be at most 2147483647 ms'],
     ];
     for (const [input, message] of cases) {
       const result = await client.callTool({ name: 'vhdl_mutate', arguments: input });
       expect(result.isError, JSON.stringify(input)).toBe(true);
       expect(JSON.stringify(result.content), JSON.stringify(input)).toContain(message);
     }
+    expect(vhdlMutateSchema.safeParse({ file: 'adder.vhd', testbenches: [bench], timeoutMs: 2147483647 }).success).toBe(true);
   });
 });
 

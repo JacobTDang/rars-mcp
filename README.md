@@ -69,8 +69,9 @@ path, because writing through it would create its target. Folders come from, in 
   `fa0`-`fa7`, and the CSRs `ustatus`, `fflags`, `frm`, `fcsr`, `uie`, `utvec`, `uscratch`, `uepc`,
   `ucause`, `utval`, `uip`, `cycle`, `time`, `instret`, `cycleh`, `timeh` and `instreth`. The RARS
   command line cannot print `pc`; read it with `rars_inspect`. `memoryRanges` takes word-aligned
-  ranges such as `0x10010000-0x1001000c`, both ends included. Requested registers and memory come
-  back as structured values, not raw RARS text:
+  ranges such as `0x10010000-0x1001000c`, both ends included. `maxSteps` and `timeoutMs` are at
+  most 2147483647. Requested registers and memory come back as structured values, not raw RARS
+  text:
 
   ```json
   { "registers": { "t0": { "hex": "0xfffff000", "signed": -4096 } },
@@ -142,7 +143,7 @@ results and quotes RARS's reason.
   `breakpoint_add`, `breakpoint_remove`.
   - A breakpoint `address` may be a number, a code label such as `EXIT`, or a source location
     such as `prob1a.s:17`.
-  - `continue` takes an optional `maxSteps` (1,000,000 by default).
+  - `continue` takes an optional `maxSteps` (1,000,000 by default, at most 2147483647).
   - Every step and continue reports why it stopped: `step`, `breakpoint`, `step_limit`, `exited`,
     `ran_off_end`, `exception` or `terminated`. A program that has terminated refuses to run
     until the session is reset.
@@ -209,7 +210,7 @@ They share the wall-clock and output limits of a RARS run.
   and `occurrence` (counted from 1; every match by default), and a `find` that matches nothing is
   an error. Without them, each operator in the file's statements becomes one mutation, up to 64:
   `+`/`-`, `and`/`or`, `=`/`/=`, `<`/`>=`, `<=`/`>`, `'0'`/`'1'` in assignments, and removing
-  `not`. Options: `std`, `stopTime` and `timeoutMs`, the limit for each run.
+  `not`. Options: `std`, `stopTime` and `timeoutMs`, the limit for each run (at most 2147483647).
 
   ```json
   { "mutations": [{ "name": "line 18: + -> -", "line": 18, "caught": true,
@@ -310,10 +311,10 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_BRIDGE_JAR` | `java/bridge/build/rars-mcp-bridge.jar` | The Java bridge used by debugger sessions |
 | `RARS_BRIDGE_HOST` | `127.0.0.1` | Host of the visible desktop session |
 | `RARS_LIVE_DISCOVERY_DIR` | `.runtime` | Where the launcher writes its port and token |
-| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, and for starting the Java bridge |
+| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, and for starting the Java bridge; at most 2147483647 |
 | `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
-| `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes |
+| `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes; at most 2147483647 |
 | `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads, and the most an FST file or any part of it may unpack to |
 | `JAVA_EXECUTABLE` | `java` | Java binary to run |
 | `TCLSH` | `tclsh` | Tcl shell `do_file_check` runs scripts with |
