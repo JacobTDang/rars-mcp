@@ -9,7 +9,7 @@ import type { ToolDependencies, ToolResult } from './handlers.js';
 
 const execFileAsync = promisify(execFile);
 
-export const statusSchema = z.object({});
+export const statusSchema = z.strictObject({});
 
 // Every check reports its own failure in an error field, so one missing piece never hides the rest.
 type Checked<T> = T & { error?: string };

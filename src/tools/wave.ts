@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { queryVcd, type WaveQueryResult, type WaveSignal, type WaveValue } from '../vhdl/vcd.js';
 import type { ToolDependencies, ToolResult } from './handlers.js';
 
-export const waveQuerySchema = z.object({
+export const waveQuerySchema = z.strictObject({
   file: z.string().min(1).describe('A VCD file in the workspace'),
   signals: z.array(z.string().min(1)).min(1)
     .describe('Hierarchical signal names such as tb_alu.s_ovfl or tb_alu/dut/s_sum, matched ignoring case'),

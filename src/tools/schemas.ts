@@ -1,18 +1,34 @@
 import { z } from 'zod';
 
+// zod reports a union whose every option fails as just "Invalid input", which hides a misspelt key.
+// A key none of these objects takes, in the input or in the objects of an input array, is named
+// instead, as a strict object names it.
+function unknownKeyError(...objects: Array<{ shape: Record<string, unknown> }>) {
+  const known = new Set(objects.flatMap((object) => Object.keys(object.shape)));
+  const isObject = (item: unknown): item is object => typeof item === 'object' && item !== null && !Array.isArray(item);
+  return (issue: { input?: unknown }): string | undefined => {
+    const items: unknown[] = Array.isArray(issue.input) ? issue.input : [issue.input];
+    const unknown = [...new Set(items.filter(isObject).flatMap((item) => Object.keys(item)).filter((key) => !known.has(key)))];
+    if (unknown.length === 0) return undefined;
+    return `Unrecognized key${unknown.length === 1 ? '' : 's'}: ${unknown.map((key) => `"${key}"`).join(', ')}`;
+  };
+}
+
 const dumpWordsSchema = z.number().int().positive().max(65_536);
+const labelSegmentSchema = z.strictObject({ label: z.string().min(1), words: dumpWordsSchema });
+const addressSegmentSchema = z.strictObject({ address: z.string().regex(/^0x[0-9a-fA-F]+$/), words: dumpWordsSchema });
 const dumpSegmentSchema = z.union([
   z.string().regex(/^(?:\.text|\.data|0x[0-9a-fA-F]+-0x[0-9a-fA-F]+)$/),
-  z.strictObject({ label: z.string().min(1), words: dumpWordsSchema }),
-  z.strictObject({ address: z.string().regex(/^0x[0-9a-fA-F]+$/), words: dumpWordsSchema }),
-]);
-export const dumpSchema = z.object({
+  labelSegmentSchema,
+  addressSegmentSchema,
+], { error: unknownKeyError(labelSegmentSchema, addressSegmentSchema) });
+export const dumpSchema = z.strictObject({
   segment: dumpSegmentSchema,
   format: z.enum(['SegmentWindow', 'HexText', 'AsciiText', 'HEX', 'Binary', 'BinaryText']),
   file: z.string().min(1).optional(),
 });
 
-const sourceFileSchema = z.object({
+const sourceFileSchema = z.strictObject({
   name: z.string().min(1).refine(
     (name) => name !== '.' && !name.includes('..') && !name.includes('/') && !name.includes('\\'),
     'source name must be a bare file name without path separators or ..',
@@ -28,7 +44,7 @@ const sourceFilesSchema = z.array(sourceFileSchema).min(1).superRefine((files, c
     names.add(name);
   });
 });
-const sourceSchema = z.union([z.string(), sourceFilesSchema]);
+const sourceSchema = z.union([z.string(), sourceFilesSchema], { error: unknownKeyError(sourceFileSchema) });
 const sourceSelection = {
   files: z.array(z.string().min(1)).min(1).optional(),
   source: sourceSchema.optional(),
@@ -44,12 +60,12 @@ const validateSourceSelection = (
   }
 };
 
-export const assembleSchema = z.object({
+export const assembleSchema = z.strictObject({
   ...sourceSelection,
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);
 
-export const runSchema = z.object({
+export const runSchema = z.strictObject({
   ...sourceSelection,
   stdin: z.string().optional(),
   programArgs: z.array(z.string()).optional(),
@@ -61,9 +77,9 @@ export const runSchema = z.object({
   dump: z.array(dumpSchema).optional(),
 }).superRefine(validateSourceSelection);
 
-export const closeSessionSchema = z.object({ sessionId: z.string().uuid() });
-export const emptySchema = z.object({});
-export const debugStartSchema = z.object({
+export const closeSessionSchema = z.strictObject({ sessionId: z.string().uuid() });
+export const emptySchema = z.strictObject({});
+export const debugStartSchema = z.strictObject({
   ...sourceSelection,
   programArgs: z.array(z.string()).optional(),
   stdin: z.string().optional(),
@@ -74,7 +90,7 @@ export const isBreakpointAction = (action: string): action is typeof breakpointA
   (breakpointActions as readonly string[]).includes(action);
 // Kept as one flat object: clients that require a plain top-level object schema
 // flatten a top-level union and lose every variant but the first.
-export const debugCommandSchema = z.object({
+export const debugCommandSchema = z.strictObject({
   sessionId: z.string().uuid(),
   action: z.enum([...executionActions, ...breakpointActions]),
   address: z.string().describe('Breakpoint location: an address, a code label, or file:line').optional(),
@@ -106,10 +122,13 @@ const instructionWindowSchema = z.strictObject({
     context.addIssue({ code: 'custom', message: 'instructions takes around and count, or both from and to' });
   }
 });
-export const inspectSchema = z.object({
+const byteWidthSchema = z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]);
+const memoryReadSchema = z.strictObject({ address: z.string(), length: byteWidthSchema });
+const memoryWriteSchema = z.strictObject({ address: z.string(), value: z.string(), width: byteWidthSchema });
+export const inspectSchema = z.strictObject({
   sessionId: z.string().uuid(),
   registers: z.array(z.string()).optional(),
-  memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional(),
+  memory: z.array(memoryReadSchema).optional(),
   includeSymbols: z.boolean().optional(),
   includeInstructions: z.boolean().describe('Deprecated: returns every instruction in the program; use instructions instead').optional(),
   instructions: instructionWindowSchema
@@ -119,25 +138,22 @@ export const inspectSchema = z.object({
     context.addIssue({ code: 'custom', path: ['instructions'], message: 'includeInstructions and instructions cannot be combined' });
   }
 });
-export const modifySchema = z.object({
+export const modifySchema = z.strictObject({
   sessionId: z.string().uuid(),
   registers: z.record(z.string(), z.string()).optional(),
-  memory: z.array(z.object({
-    address: z.string(), value: z.string(), width: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]),
-  })).optional(),
+  memory: z.array(memoryWriteSchema).optional(),
 });
-export const liveConnectSchema = z.object({});
-const liveDebugCommand = z.discriminatedUnion('action', [
-  z.object({ action: z.enum(['step', 'backstep', 'continue', 'pause', 'reset', 'terminate']) }),
-  z.object({ action: z.enum(['breakpoint_add', 'breakpoint_remove']), address: z.string() }),
-]);
-export const liveCommandSchema = z.object({
+export const liveConnectSchema = z.strictObject({});
+// One discriminated union, so a command is checked against the variant its action names and a
+// misspelt key is reported as such, not as a failure to match any variant.
+export const liveCommandSchema = z.strictObject({
   sessionId: z.string().uuid(),
-  command: z.union([
-    liveDebugCommand,
-    z.object({ action: z.literal('load'), files: z.array(z.string()).min(1), programArgs: z.array(z.string()).optional(), stdin: z.string().optional(), conflictPolicy: z.enum(['reject', 'discard']).default('reject') }),
-    z.object({ action: z.literal('inspect'), registers: z.array(z.string()).optional(), memory: z.array(z.object({ address: z.string(), length: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional() }),
-    z.object({ action: z.literal('modify'), registers: z.record(z.string(), z.string()).optional(), memory: z.array(z.object({ address: z.string(), value: z.string(), width: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]) })).optional() }),
+  command: z.discriminatedUnion('action', [
+    z.strictObject({ action: z.enum(executionActions) }),
+    z.strictObject({ action: z.enum(breakpointActions), address: z.string() }),
+    z.strictObject({ action: z.literal('load'), files: z.array(z.string()).min(1), programArgs: z.array(z.string()).optional(), stdin: z.string().optional(), conflictPolicy: z.enum(['reject', 'discard']).default('reject') }),
+    z.strictObject({ action: z.literal('inspect'), registers: z.array(z.string()).optional(), memory: z.array(memoryReadSchema).optional() }),
+    z.strictObject({ action: z.literal('modify'), registers: z.record(z.string(), z.string()).optional(), memory: z.array(memoryWriteSchema).optional() }),
   ]),
 });
 

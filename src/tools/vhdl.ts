@@ -16,16 +16,16 @@ const work = identifier.describe('Library the files are analysed into, work by d
 export const stopTime = z.string().regex(/^\s*\d+\s*(?:fs|ps|ns|us|ms|sec)\s*$/, 'must be a whole number and a unit: fs, ps, ns, us, ms or sec')
   .describe('Simulation time to stop at, such as "1 us"; without it the run lasts until no events remain').optional();
 
-export const vhdlCompileSchema = z.object({ files, std, work });
+export const vhdlCompileSchema = z.strictObject({ files, std, work });
 
-export const vhdlRunSchema = z.object({
+export const vhdlRunSchema = z.strictObject({
   testbench: identifier.describe('Top-level entity to elaborate and run'),
   files,
   std,
   work,
   stopTime,
   generics: z.record(identifier, z.string().min(1)).describe('Values for the testbench generics, such as { "WIDTH": "8" }').optional(),
-  wave: z.object({
+  wave: z.strictObject({
     file: z.string().min(1).describe('Workspace file to write; its folder must already exist'),
     format: z.enum(['vcd', 'fst']).describe('vcd unless the file name ends in .fst').optional(),
   }).describe('Write a waveform of the run to a workspace file').optional(),
