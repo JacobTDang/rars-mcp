@@ -93,6 +93,7 @@ export function createToolHandlers(deps: ToolDependencies) {
       const preparedDumps = await prepareDumps(
         resolvedDumps, (file) => deps.workspace.resolve(file, { allowMissing: true }),
       );
+      const timeoutMs = runInput.timeoutMs ?? deps.timeoutMs;
       let result: CliResult;
       let dumpOutput: Array<Record<string, unknown>>;
       let unwrittenDumps: string[];
@@ -112,7 +113,7 @@ export function createToolHandlers(deps: ToolDependencies) {
             ...(runInput.memoryRanges === undefined ? {} : { memoryRanges: runInput.memoryRanges }),
             ...(preparedDumps.cli.length ? { dumps: preparedDumps.cli } : {}),
           },
-          timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
+          timeoutMs,
           maxOutputBytes: deps.maxOutputBytes,
         });
         // RARS names the file of a dump it could not write, and a temporary path means nothing to the caller.
@@ -138,7 +139,7 @@ export function createToolHandlers(deps: ToolDependencies) {
       const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
         diagnostics.some((item) => item.severity === 'error') || unwrittenDumps.length > 0;
       const action = mode === 'assemble' ? 'Assembly' : 'Execution';
-      const summary = result.timedOut ? `${action} timed out` :
+      const summary = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
         result.truncated ? `${action} output exceeded its limit` :
         isError ? `${action} failed` : `${action} completed`;
       const details = [

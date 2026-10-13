@@ -29,7 +29,8 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     inputSchema: assembleSchema,
   }, handlers.assemble);
   server.registerTool('rars_run', {
-    description: 'Run RISC-V source files in an isolated headless RARS process.',
+    description: 'Run RISC-V source files in an isolated headless RARS process. '
+      + 'instructionCount is RARS\'s ic count, which excludes the final exit ecall.',
     inputSchema: runSchema,
   }, handlers.run);
   server.registerTool('rars_eval', {
