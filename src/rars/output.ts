@@ -2,6 +2,16 @@
 const DUMP_LINE = /^(\S+\t0x[0-9a-f]+|Mem\[0x[0-9a-f]+\](\t0x[0-9a-f]+)*\t?)$/i;
 const REGISTER_LINE = /^(\S+)\t(0x[0-9a-f]+)$/i;
 const MEMORY_LINE = /^Mem\[(0x[0-9a-f]+)\]((?:\t0x[0-9a-f]+)*)\t?$/i;
+// What RARS prints for each memory-image dump it could not write, after the register and memory dumps.
+const DUMP_FILE_ERROR = /^(?:Error while attempting to save dump, .*|This segment has not been written to, there is nothing to dump\.)$/;
+
+// The index just past the last register or memory dump line.
+function dumpLinesEnd(lines: string[]): number {
+  let end = lines.length;
+  if (lines[end - 1] === '') end--;
+  while (end > 0 && DUMP_FILE_ERROR.test(lines[end - 1]!)) end--;
+  return end;
+}
 
 export interface Word {
   hex: string;
@@ -23,8 +33,7 @@ const ASSEMBLY_FAILED = 'Processing terminated due to errors.';
 export function extractInstructionCount(stderr: string): { instructionCount?: number; stderr: string } {
   if (stderr.includes(ASSEMBLY_FAILED)) return { stderr };
   const lines = stderr.split('\n');
-  let index = lines.length - 1;
-  if (lines[index] === '') index--;
+  let index = dumpLinesEnd(lines) - 1;
   while (index >= 0 && DUMP_LINE.test(lines[index]!)) index--;
   if (index < 0 || !/^\d+$/.test(lines[index]!)) throw new Error('RARS did not report an instruction count');
   const instructionCount = Number(lines[index]);
@@ -35,8 +44,7 @@ export function extractInstructionCount(stderr: string): { instructionCount?: nu
 // Parses the register and memory dumps RARS prints at the end of stderr, and removes them from it.
 export function extractDumps(stderr: string): { registers: Record<string, Word>; memory: MemoryWord[]; stderr: string } {
   const lines = stderr.split('\n');
-  let end = lines.length;
-  if (lines[end - 1] === '') end--;
+  const end = dumpLinesEnd(lines);
   let start = end;
   while (start > 0 && DUMP_LINE.test(lines[start - 1]!)) start--;
 

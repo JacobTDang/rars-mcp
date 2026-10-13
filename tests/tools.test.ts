@@ -171,6 +171,115 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
     });
     expect((result.structuredContent as { stderr: string }).stderr).not.toContain('a7\t');
   });
+
+  it('rejects a label dump whose address is not word aligned before running RARS', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\nfirst: .byte 1\nsecond: .byte 2\n.text\nmain:\n  li a7, 10\n  ecall\n');
+    const run = vi.fn(runRars);
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+      bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    await expect(handlers.run({
+      files: ['prog.s'], dump: [{ segment: { label: 'second', words: 1 }, format: 'HexText' }],
+    })).rejects.toThrow('dump label second at 0x10010001 is not word aligned');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('reports the error RARS gives when it writes no inline dump', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['dump-array.asm'], dump: [{ segment: { address: '0x10040000', words: 2 }, format: 'HexText' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed\nProgram terminated by calling exit\n'
+        + 'This segment has not been written to, there is nothing to dump.\n'
+        + 'RARS wrote no file for dump[0] (0x10040000-0x10040008)',
+    }]);
+    expect(result.structuredContent).not.toHaveProperty('dumps.0.text');
+  });
+
+  it('still reads the count and registers when RARS writes no inline dump', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['dump-array.asm'], instructionCount: true, registers: ['a7'],
+      dump: [{ segment: { address: '0x10040000', words: 2 }, format: 'HexText' }],
+    });
+
+    expect(result).toMatchObject({
+      isError: true, structuredContent: { instructionCount: 1, registers: { a7: { hex: '0x0000000a' } } },
+    });
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed\nProgram terminated by calling exit\n'
+        + 'This segment has not been written to, there is nothing to dump.\n'
+        + 'RARS wrote no file for dump[0] (0x10040000-0x10040008)',
+    }]);
+  });
+
+  it('keeps the temporary dump path out of the reply when RARS names the file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    let dumpFile: string | undefined;
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: (options) => {
+        dumpFile = options.request.dumps![0]!.file;
+        return runRars(options);
+      },
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['dump-array.asm'], dump: [{ segment: { address: '0x00000000', words: 4 }, format: 'HexText' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining('Error while attempting to save dump, file dump[0]!  Could not access address: 0!'),
+    });
+    expect(dumpFile).toBeTruthy();
+    expect(JSON.stringify(result)).not.toContain(dumpFile!);
+  });
+
+  it('reports a workspace dump file that RARS did not write', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/dump-array.asm', join(root, 'dump-array.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      files: ['dump-array.asm'],
+      dump: [{ segment: { address: '0x10040000', words: 2 }, format: 'HexText', file: 'heap.hex' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining('This segment has not been written to, there is nothing to dump.'),
+    });
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining('RARS wrote no file for dump[0] (0x10040000-0x10040008)'),
+    });
+  });
 });
 
 describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
@@ -375,6 +484,46 @@ describe('headless tool handlers', () => {
     expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('timed out') });
   });
 
+  it('rejects an unaligned dump address before running RARS', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1, 2, 3\n');
+    const run = vi.fn();
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run,
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    await expect(handlers.run({
+      files: ['prog.s'], dump: [{ segment: { address: '0x10010001', words: 2 }, format: 'HexText' }],
+    })).rejects.toThrow('dump address 0x10010001 is not word aligned');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('reports what RARS printed when it wrote no inline dump file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async (options) => ({
+        exitCode: 0, signal: null, stdout: '',
+        stderr: `\nProgram terminated by calling exit\nError while attempting to save dump, file ${options.request.dumps![0]!.file} was not found!\n`,
+        timedOut: false, truncated: false,
+      }),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['prog.s'], dump: [{ segment: '.data', format: 'HexText' }] });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { dumps: [{ segment: '.data', format: 'HexText' }] } });
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution failed\nProgram terminated by calling exit\n'
+        + 'Error while attempting to save dump, file dump[0] was not found!\n'
+        + 'RARS wrote no file for dump[0] (.data)',
+    }]);
+    expect(JSON.stringify(result)).not.toMatch(/ENOENT|rars-dumps-/);
+  });
+
   it('lists and closes sessions', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     const sessions = new SessionStore();
@@ -437,5 +586,23 @@ describe('dump schema', () => {
     expect(dumpSchema.safeParse({
       segment: { address: '0x10010000', words }, format: 'HexText',
     }).success).toBe(false);
+  });
+
+  it.each<[unknown, string[]]>([
+    [{ address: '0x10010001', words: 2 }, ['0x10010001']],
+    [{ address: '0x1001000E', words: 1 }, ['0x1001000E']],
+    ['0x10010001-0x10010009', ['0x10010001', '0x10010009']],
+    ['0x10010000-0x10010006', ['0x10010006']],
+  ])('rejects the unaligned segment %j', (segment, addresses) => {
+    const result = dumpSchema.safeParse({ segment, format: 'HexText' });
+
+    expect(result.error?.issues.map(({ message }) => message))
+      .toEqual(addresses.map((address) => `dump address ${address} is not word aligned`));
+  });
+
+  it.each<unknown>([
+    { address: '0x10010004', words: 1 }, { address: '0x1001000C', words: 1 }, '0x10010000-0x1001000c', '.data',
+  ])('accepts the word-aligned segment %j', (segment) => {
+    expect(dumpSchema.safeParse({ segment, format: 'HexText' }).success).toBe(true);
   });
 });
