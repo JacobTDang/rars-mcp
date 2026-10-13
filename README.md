@@ -174,8 +174,8 @@ They share the wall-clock and output limits of a RARS run.
     testbench can pass without testing anything. `vhdl_run` reports each one as a `warning`
     diagnostic.
   - Without `stopTime` the run lasts until no events remain, or until the wall-clock limit.
-  - `wave: { "file": "waves/tb.vcd" }` writes a waveform of the run. `format` is `vcd`, which
-    `wave_query` reads, or `fst`, the default for a file ending in `.fst`. The target folder must
+  - `wave: { "file": "waves/tb.vcd" }` writes a waveform of the run. `format` is `vcd`, or `fst`,
+    the default for a file ending in `.fst`; `wave_query` reads both. The target folder must
     already exist.
 - **`vhdl_mutate`** — check that testbenches catch real bugs. Each mutation is applied to a copy
   of `file` in a temporary folder, and each of `testbenches` (`{ "top", "files" }`, where `files`
@@ -194,8 +194,8 @@ They share the wall-clock and output limits of a RARS run.
 
   The unmutated design runs first. If a testbench fails on it, no mutation runs and the result is
   an error, as it is for a mutated copy that does not analyse. A low score is not an error.
-- **`wave_query`** — read signal values from a VCD waveform at chosen times, so a check like "is
-  `s_ovfl` 1 at 20 ns?" needs no waveform viewer. Signals are hierarchical names such as
+- **`wave_query`** — read signal values from a VCD or FST waveform at chosen times, so a check
+  like "is `s_ovfl` 1 at 20 ns?" needs no waveform viewer. Signals are hierarchical names such as
   `tb_alu.s_ovfl` or `tb_alu/dut/s_sum`, matched ignoring case. Times look like `20 ns`, `1.5us`,
   or a bare `100` in the file's timescale units. Each value is the last change at or before that
   time, and a time before the first dump reads as `x`:
@@ -207,15 +207,19 @@ They share the wall-clock and output limits of a RARS run.
 
   `hex`, `unsigned` and `signed` are `null` when a bit is not 0 or 1. An unknown signal is an error
   that lists the signals sharing its last name. nvc writes VCD with `--wave=tb.vcd --format=vcd`
-  and GHDL with `--vcd=tb.vcd`; FST and GHW files, and files over `WAVE_MAX_BYTES`, are refused.
+  and FST with `--wave=tb.fst --format=fst`; GHDL writes VCD with `--vcd=tb.vcd`. An FST file
+  gives the same result as a VCD file of the same run. It is read whole, so it is refused when it,
+  or any part of it, unpacks to more than `WAVE_MAX_BYTES`. FST features that nvc does not write,
+  such as LZ4 or FastLZ compression and `$dumpoff` periods, are refused with an error that names
+  them. GHW files, gzip-compressed VCD files and files over `WAVE_MAX_BYTES` are refused.
 
   The result also gives the dump's first and last timestamps as `startTime` and `endTime`, such as
-  `"40 ns"`. The whole file is read to find them, and a file with no timestamp is an error. A row
-  for a time before the first timestamp or after the last one still has the values the file
-  implies, but those values were not recorded, so the row also has `"beyond": "before"` or
-  `"after"` and the table ends it with `(before start 5 ns)` or `(after end 40 ns)`. When no time
-  is inside the dump, the table starts with a line that says so, such as `The dump ends at 40 ns,
-  before every requested time.`
+  `"40 ns"`. An FST file gives them in its header. A VCD file is read to the end to find them,
+  and a VCD file with no timestamp is an error. A row for a time before the first timestamp or
+  after the last one still has the values the file implies, but those values were not recorded,
+  so the row also has `"beyond": "before"` or `"after"` and the table ends it with
+  `(before start 5 ns)` or `(after end 40 ns)`. When no time is inside the dump, the table starts
+  with a line that says so, such as `The dump ends at 40 ns, before every requested time.`
 
 - **`do_file_check`** — dry-run a Questa or ModelSim `.do` script without a simulator. Returns
   the files it compiles, in order, with each one's library, VHDL standard and whether it exists,
@@ -285,7 +289,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes |
-| `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads |
+| `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads, and the most an FST file or any part of it may unpack to |
 | `JAVA_EXECUTABLE` | `java` | Java binary to run |
 | `TCLSH` | `tclsh` | Tcl shell `do_file_check` runs scripts with |
 | `VHDL_SIMULATOR` | `nvc` | nvc executable used by the VHDL tools |

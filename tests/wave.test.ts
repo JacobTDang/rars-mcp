@@ -200,26 +200,64 @@ describe('wave_query', () => {
     );
   });
 
-  it('names an FST file written by nvc instead of reading it', async () => {
-    const query = createWaveQuery({ workspace: await workspaceWith('alu.fst'), waveMaxBytes: 1024 * 1024 });
+  it('reads an FST file written by nvc the same as the VCD of the same run', async () => {
+    const query = createWaveQuery({ workspace: await workspaceWith('alu.vcd', 'alu.fst'), waveMaxBytes: 1024 * 1024 });
+    const withLate = [...signals, 'tb_alu.s_late'];
+    const pastEnd = [...times, '1 us'];
 
-    await expect(query({ file: 'alu.fst', signals, times })).rejects.toThrow(
-      'alu.fst is an FST file; wave_query reads only VCD, which nvc writes with --wave=<name>.vcd --format=vcd '
-        + 'and GHDL with --vcd=<name>.vcd',
+    const fst = await query({ file: 'alu.fst', signals: withLate, times: pastEnd });
+    const vcd = await query({ file: 'alu.vcd', signals: withLate, times: pastEnd });
+
+    expect(fst.isError).toBeFalsy();
+    expect(fst).toEqual(vcd);
+    expect(fst.structuredContent).toMatchObject({
+      startTime: '0 fs',
+      endTime: '40 ns',
+      values: [
+        { time: '0 ns', 'tb_alu.s_a': { hex: '0x3' }, 'tb_alu.s_late': { bits: 'u', hex: null } },
+        { time: '10ns', 'tb_alu.dut.s_sum': { bits: '1000', signed: -8 }, 'tb_alu.s_ratio': { real: 0.25 } },
+        { time: '20 ns', 'tb_alu.s_ovfl': { bits: '1' }, 'tb_alu.s_late': { bits: '1' } },
+        { time: '35 ns', 'tb_alu.s_a': { bits: '01zx', hex: null }, 'tb_alu.s_phase': { string: 'done' } },
+        { time: '1 us', beyond: 'after', 'tb_alu.s_a': { bits: '01zx' } },
+      ],
+    });
+    expect((fst.content[0] as { text: string }).text.split('\n').at(-1)).toMatch(/^1 us .* \(after end 40 ns\)$/);
+  });
+
+  it('refuses an FST file over WAVE_MAX_BYTES before reading it, or one that unpacks past it', async () => {
+    const workspace = await workspaceWith('alu.fst');
+    const { size } = await stat(join(workspace.root, 'alu.fst'));
+
+    await expect(createWaveQuery({ workspace, waveMaxBytes: size - 1 })({ file: 'alu.fst', signals, times })).rejects.toThrow(
+      `alu.fst is ${size} bytes, over the WAVE_MAX_BYTES limit of ${size - 1}`,
+    );
+    await expect(createWaveQuery({ workspace, waveMaxBytes: size + 1 })({ file: 'alu.fst', signals, times })).rejects.toThrow(
+      `alu.fst is over the WAVE_MAX_BYTES limit of ${size + 1}: it unpacks to 821 bytes`,
     );
   });
 
-  it('names an uncompressed FST file, a GHW file and a gzip-compressed file', async () => {
+  it('names the file and format of an FST file it cannot read', async () => {
     const workspace = await workspaceWith();
     const fstHeader = Buffer.alloc(32);
     fstHeader.writeBigUInt64BE(329n, 1);
     await writeFile(join(workspace.root, 'plain.fst'), fstHeader);
+    const query = createWaveQuery({ workspace, waveMaxBytes: 1024 * 1024 });
+
+    await expect(query({ file: 'plain.fst', signals, times })).rejects.toThrow(
+      'plain.fst is not a readable FST file: the block at byte 0 runs past the end of the file',
+    );
+  });
+
+  it('names a GHW file and a gzip-compressed file instead of reading them', async () => {
+    const workspace = await workspaceWith();
     await writeFile(join(workspace.root, 'wave.ghw'), Buffer.from('GHDLwave\n\x10\x01\x00\x00', 'latin1'));
     await writeFile(join(workspace.root, 'wave.vcd.gz'), gzipSync(await readFile(join(fixtures, 'alu.vcd'))));
     const query = createWaveQuery({ workspace, waveMaxBytes: 1024 * 1024 });
 
-    await expect(query({ file: 'plain.fst', signals, times })).rejects.toThrow('plain.fst is an FST file; wave_query reads only VCD');
-    await expect(query({ file: 'wave.ghw', signals, times })).rejects.toThrow('wave.ghw is a GHW file; wave_query reads only VCD');
+    await expect(query({ file: 'wave.ghw', signals, times })).rejects.toThrow(
+      'wave.ghw is a GHW file, which wave_query does not read; write FST or VCD instead, '
+        + 'with nvc --wave=<name>.fst --format=fst or GHDL --vcd=<name>.vcd',
+    );
     await expect(query({ file: 'wave.vcd.gz', signals, times })).rejects.toThrow('wave.vcd.gz is gzip-compressed; decompress it first');
   });
 

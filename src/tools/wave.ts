@@ -1,12 +1,14 @@
 import { createReadStream } from 'node:fs';
-import { open, stat } from 'node:fs/promises';
+import { open, readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 
-import { queryVcd, type WaveQueryResult, type WaveSignal, type WaveValue } from '../vhdl/vcd.js';
+import { queryFst } from '../vhdl/fst.js';
+import { queryVcd } from '../vhdl/vcd.js';
+import type { WaveQueryResult, WaveSignal, WaveValue } from '../vhdl/wave.js';
 import type { ToolDependencies, ToolResult } from './handlers.js';
 
 export const waveQuerySchema = z.strictObject({
-  file: z.string().min(1).describe('A VCD file in the workspace'),
+  file: z.string().min(1).describe('A VCD or FST file in the workspace'),
   signals: z.array(z.string().min(1)).min(1)
     .describe('Hierarchical signal names such as tb_alu.s_ovfl or tb_alu/dut/s_sum, matched ignoring case'),
   times: z.array(z.string().min(1)).min(1)
@@ -14,8 +16,6 @@ export const waveQuerySchema = z.strictObject({
 });
 
 export type WaveQueryInput = z.infer<typeof waveQuerySchema>;
-
-const VCD_HINT = 'wave_query reads only VCD, which nvc writes with --wave=<name>.vcd --format=vcd and GHDL with --vcd=<name>.vcd';
 
 export function createWaveQuery(deps: Pick<ToolDependencies, 'workspace' | 'waveMaxBytes'>) {
   return async (input: WaveQueryInput): Promise<ToolResult> => {
@@ -27,8 +27,14 @@ export function createWaveQuery(deps: Pick<ToolDependencies, 'workspace' | 'wave
     }
     const format = await binaryFormat(file);
     if (format === 'gzip') throw new Error(`${input.file} is gzip-compressed; decompress it first`);
-    if (format !== undefined) throw new Error(`${input.file} is ${format === 'FST' ? 'an' : 'a'} ${format} file; ${VCD_HINT}`);
-    const result = await queryVcd(createReadStream(file, { encoding: 'utf8' }), input);
+    if (format === 'GHW') {
+      throw new Error(`${input.file} is a GHW file, which wave_query does not read; write FST or VCD instead, `
+        + 'with nvc --wave=<name>.fst --format=fst or GHDL --vcd=<name>.vcd');
+    }
+    // An FST file is read whole, which the size check above bounds; VCD text is streamed.
+    const result = format === 'FST'
+      ? queryFst(await readFile(file), input, { name: input.file, maxBytes: deps.waveMaxBytes })
+      : await queryVcd(createReadStream(file, { encoding: 'utf8' }), input);
     return { content: [{ type: 'text', text: table(result) }], structuredContent: result as unknown as Record<string, unknown> };
   };
 }

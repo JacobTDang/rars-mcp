@@ -8,6 +8,7 @@ architecture sim of tb_alu is
   type phase_t is (SETUP, CHECK, DONE);
   signal s_a, s_b, s_sum : std_logic_vector(3 downto 0);
   signal s_ovfl : std_logic;
+  signal s_late : std_logic;  -- 'U' until 20 ns
   signal s_ratio : real := 0.0;
   signal s_step : integer := 0;
   signal s_phase : phase_t := SETUP;
@@ -22,7 +23,7 @@ begin
     s_step <= 1; s_phase <= CHECK;
     wait for 10 ns;
     s_a <= "1000"; s_b <= "1111"; s_ratio <= -2.0;  -- -8 + -1 overflows to 7
-    s_step <= 2;
+    s_step <= 2; s_late <= '1';
     wait for 10 ns;
     s_a <= "01ZX"; s_b <= "0001";                   -- unknown inputs
     s_step <= -1; s_phase <= DONE;

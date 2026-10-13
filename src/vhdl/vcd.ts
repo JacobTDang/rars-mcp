@@ -1,58 +1,10 @@
 // Reads signal values at chosen times from a Value Change Dump (IEEE 1364, section 18). The text
 // arrives in chunks and only the requested signals are kept, so memory follows the query, not the file.
 
-export type WaveValue =
-  | { bits: string; hex: string | null; unsigned: number | string | null; signed: number | string | null }
-  | { real: number | null }
-  | { string: string | null };
-
-export interface WaveSignal {
-  name: string;
-  width: number;
-  type: string;
-}
-
-export interface WaveQuery {
-  signals: string[];
-  times: string[];
-}
-
-export interface WaveRow {
-  time: string;
-  // Set when the time is before the first timestamp or after the last one, so its values were not recorded.
-  beyond?: 'before' | 'after';
-  [signal: string]: string | WaveValue;
-}
-
-export interface WaveQueryResult {
-  timescale: string | null;
-  // The first and last timestamps of the dump.
-  startTime: string;
-  endTime: string;
-  signals: WaveSignal[];
-  values: WaveRow[];
-}
-
-type Kind = 'bits' | 'real' | 'string';
-
-interface Variable extends WaveSignal {
-  id: string;
-  kind: Kind;
-  // Last part of the name, and the names it answers to: without and with its declared bit range.
-  leaf: string;
-  keys: string[];
-}
-
-interface Timescale {
-  magnitude: bigint;
-  exponent: number;
-  label: string;
-}
-
-const UNIT_EXPONENTS: Readonly<Record<string, number>> = { s: 0, ms: -3, us: -6, ns: -9, ps: -12, fs: -15 };
-const TIME = /^(\d+(?:\.\d*)?|\.\d+)\s*(fs|ps|ns|us|ms|s)?$/i;
-const STATES = /^[01xzuwlh-]+$/i;
-const LISTED_NAMES = 20;
+import {
+  BIT_STATES, Sampler, UNIT_EXPONENTS, waveVariable,
+  type Timescale, type WaveKind, type WaveQuery, type WaveQueryResult, type WaveVariable,
+} from './wave.js';
 
 // The whole file is read, even after every requested time is answered, to find its last timestamp.
 export async function queryVcd(chunks: AsyncIterable<string> | Iterable<string>, query: WaveQuery): Promise<WaveQueryResult> {
@@ -85,7 +37,7 @@ async function* tokenBatches(chunks: AsyncIterable<string> | Iterable<string>): 
 const clip = (token: string): string => (token.length > 40 ? `${token.slice(0, 40)}...` : token);
 
 class Definitions {
-  readonly variables: Variable[] = [];
+  readonly variables: WaveVariable[] = [];
   timescale: Timescale | undefined;
   private readonly scopes: string[] = [];
   private keyword: string | undefined;
@@ -142,48 +94,20 @@ class Definitions {
   }
 }
 
-function variable(scopes: string[], type: string, width: number, id: string, reference: string): Variable {
-  // nvc writes the range into the name, s_a[3:0]; other writers give it as its own token.
-  const ranged = /^(.+?)(\[\d+:\d+\])$/.exec(reference);
-  const leaf = ranged === null ? reference : ranged[1]!;
-  const name = [...scopes, leaf].join('.');
-  const kind: Kind = ['real', 'realtime', 'shortreal'].includes(type) ? 'real' : type === 'string' ? 'string' : 'bits';
-  return { name, width, type, id, kind, leaf, keys: ranged === null ? [name] : [name, `${name}${ranged[2]}`] };
+function variable(scopes: string[], type: string, width: number, id: string, reference: string): WaveVariable {
+  const kind: WaveKind = ['real', 'realtime', 'shortreal'].includes(type) ? 'real' : type === 'string' ? 'string' : 'bits';
+  return waveVariable(scopes, type, width, id, reference, kind);
 }
 
 class Dump {
-  private readonly signals: Variable[] = [];
-  private readonly watched = new Map<string, Variable>();
-  private readonly current = new Map<string, string | number>();
-  // Requested times in ascending order, each answered once the dump moves past it.
-  private readonly pending: Array<{ index: number } & Ticks>;
-  private readonly rows: Array<Array<string | number | undefined>> = [];
-  private readonly timescale: Timescale | undefined;
-  private answered = 0;
+  private readonly sampler: Sampler;
   private first: bigint | undefined;
   private time: bigint | undefined;
   private value: string | undefined;
   private skipping = false;
 
-  constructor(definitions: Definitions, private readonly query: WaveQuery) {
-    this.timescale = definitions.timescale;
-    const lookup = new Map<string, Variable[]>();
-    for (const variable of definitions.variables) {
-      for (const key of variable.keys.map((name) => name.toLowerCase())) {
-        const matches = lookup.get(key) ?? [];
-        matches.push(variable);
-        lookup.set(key, matches);
-      }
-    }
-    for (const requested of query.signals) {
-      const found = resolve(requested, lookup, definitions.variables);
-      if (this.signals.some((signal) => signal.name === found.name)) continue;
-      this.signals.push(found);
-      this.watched.set(found.id, found);
-    }
-    this.pending = query.times
-      .map((time, index) => ({ index, ...ticks(time, this.timescale) }))
-      .sort((left, right) => (left.ticks < right.ticks ? -1 : left.ticks > right.ticks ? 1 : 0));
+  constructor(definitions: Definitions, query: WaveQuery) {
+    this.sampler = new Sampler(definitions.variables, definitions.timescale, query);
   }
 
   read(token: string): void {
@@ -204,7 +128,7 @@ class Dump {
       this.skipping = !['$dumpvars', '$dumpall', '$dumpon', '$dumpoff', '$end'].includes(token);
     } else if ('bBrRsS'.includes(first)) {
       this.value = token;
-    } else if (STATES.test(first) && token.length > 1) {
+    } else if (BIT_STATES.test(first) && token.length > 1) {
       this.change(first, token.slice(1));
     } else {
       throw new Error(`Cannot read VCD value change "${clip(token)}" at #${this.time ?? 0}`);
@@ -214,40 +138,16 @@ class Dump {
   finish(): WaveQueryResult {
     const { first, time: last } = this;
     if (first === undefined || last === undefined) throw new Error('The VCD file has no timestamp after $enddefinitions');
-    this.answer(undefined);
-    const beyond: Array<'before' | 'after' | undefined> = [];
-    for (const { index, ticks, between } of this.pending) {
-      const after = ticks > last || (ticks === last && between);
-      beyond[index] = ticks < first ? 'before' : after ? 'after' : undefined;
-    }
-    return {
-      timescale: this.timescale?.label ?? null,
-      startTime: formatTime(first, this.timescale),
-      endTime: formatTime(last, this.timescale),
-      signals: this.signals.map(({ name, width, type }) => ({ name, width, type })),
-      values: this.query.times.map((time, index) => ({
-        time,
-        ...(beyond[index] === undefined ? {} : { beyond: beyond[index] }),
-        ...Object.fromEntries(this.signals.map((signal, column) => [signal.name, waveValue(signal, this.rows[index]![column])])),
-      })),
-    };
+    return this.sampler.finish(first, last);
   }
 
   private advance(token: string): void {
     if (!/^#\d+$/.test(token)) throw new Error(`Cannot read VCD time "${clip(token)}"`);
     const time = BigInt(token.slice(1));
     if (this.time !== undefined && time < this.time) throw new Error(`VCD time goes backwards: ${token} after #${this.time}`);
-    this.answer(time);
+    this.sampler.advance(time);
     this.first ??= time;
     this.time = time;
-  }
-
-  // Records the current values for every pending time before `until`, or for all of them.
-  private answer(until: bigint | undefined): void {
-    while (this.answered < this.pending.length && (until === undefined || this.pending[this.answered]!.ticks < until)) {
-      this.rows[this.pending[this.answered]!.index] = this.signals.map((signal) => this.current.get(signal.id));
-      this.answered += 1;
-    }
   }
 
   private change(value: string, id: string): void {
@@ -256,105 +156,23 @@ class Dump {
     const where = () => `"${clip(value)} ${clip(id)}" at #${this.time ?? 0}`;
     let parsed: string | number = text;
     if (kind === 'bits') {
-      if (!STATES.test(text)) throw new Error(`Cannot read VCD value change ${where()}`);
+      if (!BIT_STATES.test(text)) throw new Error(`Cannot read VCD value change ${where()}`);
       parsed = text.toLowerCase();
     } else if (kind === 'real') {
       parsed = Number(text);
       if (text === '' || Number.isNaN(parsed)) throw new Error(`Cannot read VCD value change ${where()}`);
     }
-    const signal = this.watched.get(id);
+    const signal = this.sampler.watching(id);
     if (signal === undefined) return;
     if (kind !== signal.kind) throw new Error(`VCD value change ${where()} does not fit ${signal.type} signal ${signal.name}`);
-    this.current.set(id, kind === 'bits' ? extend(parsed as string, signal) : parsed);
+    this.sampler.set(id, kind === 'bits' ? extend(parsed as string, signal) : parsed);
   }
-}
-
-function resolve(requested: string, lookup: Map<string, Variable[]>, variables: Variable[]): Variable {
-  const parts = requested.split(/[./]/).filter((part) => part !== '');
-  const name = parts.join('.');
-  const candidates = lookup.get(name.toLowerCase()) ?? [];
-  if (candidates.length === 1) return candidates[0]!;
-  if (candidates.length > 1) {
-    const exact = candidates.filter((candidate) => candidate.keys.includes(name));
-    if (exact.length === 1) return exact[0]!;
-    throw new Error(`Signal ${requested} is ambiguous: ${candidates.map((candidate) => candidate.name).join(', ')}`);
-  }
-  const leaf = (parts.at(-1) ?? '').replace(/\[\d+:\d+\]$/, '');
-  const sameLeaf = variables.filter((candidate) => candidate.leaf.toLowerCase() === leaf.toLowerCase());
-  const listing = (names: Variable[]) => `(${names.length > LISTED_NAMES ? `${LISTED_NAMES} of ` : ''}${names.length}): `
-    + names.slice(0, LISTED_NAMES).map((candidate) => candidate.name).join(', ');
-  if (sameLeaf.length > 0) throw new Error(`Unknown signal ${requested}. Signals named ${leaf} ${listing(sameLeaf)}`);
-  if (variables.length === 0) throw new Error(`Unknown signal ${requested}. The file declares no signals`);
-  throw new Error(`Unknown signal ${requested}. No signal is named ${leaf}; signals in the file ${listing(variables)}`);
-}
-
-interface Ticks {
-  ticks: bigint;
-  between: boolean;
-}
-
-// A time in whole ticks of the timescale, and whether it falls between two ticks. A change only happens on
-// a whole tick, so a time between two ticks rounds down to the tick before it, which still finds the last
-// change at or before it.
-function ticks(time: string, timescale: Timescale | undefined): Ticks {
-  const match = TIME.exec(time.trim());
-  if (match === null) {
-    throw new Error(`Cannot read time "${time}"; use a number with an optional unit (fs, ps, ns, us, ms, s), such as "20 ns"`);
-  }
-  const [whole = '', fraction = ''] = match[1]!.split('.');
-  const digits = BigInt(`${whole}${fraction}` || '0');
-  let exponent = -fraction.length;
-  let divisor = 1n;
-  if (match[2] !== undefined) {
-    if (timescale === undefined) {
-      throw new Error(`The VCD file has no $timescale, so "${time}" needs to be a bare number of time units`);
-    }
-    exponent += UNIT_EXPONENTS[match[2].toLowerCase()]! - timescale.exponent;
-    divisor = timescale.magnitude;
-  }
-  const numerator = exponent >= 0 ? digits * 10n ** BigInt(exponent) : digits;
-  const denominator = exponent >= 0 ? divisor : divisor * 10n ** BigInt(-exponent);
-  return { ticks: numerator / denominator, between: numerator % denominator !== 0n };
-}
-
-// Ticks as a time in the largest unit that keeps the number at least 1, such as "20 ns" or "1.5 us", or as
-// a bare number of ticks when the file has no timescale. Zero is given in the unit of the timescale.
-function formatTime(count: bigint, timescale: Timescale | undefined): string {
-  if (timescale === undefined) return count.toString();
-  // Counted in femtoseconds, the smallest unit, so every time is a whole number.
-  const femtoseconds = count * timescale.magnitude * 10n ** BigInt(timescale.exponent + 15);
-  const units = Object.entries(UNIT_EXPONENTS).map(([unit, exponent]) => ({ unit, digits: exponent + 15 }));
-  const { unit, digits } = units.find(({ digits }) => femtoseconds >= 10n ** BigInt(digits))
-    ?? units.find(({ digits }) => digits === timescale.exponent + 15)!;
-  const size = 10n ** BigInt(digits);
-  const fraction = (femtoseconds % size).toString().padStart(digits, '0').replace(/0+$/, '');
-  return `${femtoseconds / size}${fraction === '' ? '' : `.${fraction}`} ${unit}`;
 }
 
 // A value shorter than its signal is padded on the left: with 0 after a 0 or 1, otherwise with its first state.
-function extend(bits: string, signal: Variable): string {
+function extend(bits: string, signal: WaveVariable): string {
   if (bits.length > signal.width) {
     throw new Error(`VCD value b${clip(bits)} is wider than the ${signal.width} bits of ${signal.name}`);
   }
   return (bits[0] === '1' ? '0' : bits[0]!).repeat(signal.width - bits.length) + bits;
-}
-
-function waveValue(signal: Variable, value: string | number | undefined): WaveValue {
-  if (signal.kind === 'real') return { real: (value as number | undefined) ?? null };
-  if (signal.kind === 'string') return { string: (value as string | undefined) ?? null };
-  const bits = (value as string | undefined) ?? 'x'.repeat(signal.width);
-  if (!/^[01]+$/.test(bits)) return { bits, hex: null, unsigned: null, signed: null };
-  const unsigned = BigInt(`0b${bits}`);
-  const signed = bits[0] === '1' ? unsigned - (1n << BigInt(bits.length)) : unsigned;
-  return {
-    bits,
-    hex: `0x${unsigned.toString(16).padStart(Math.ceil(bits.length / 4), '0')}`,
-    unsigned: jsonInteger(unsigned),
-    signed: jsonInteger(signed),
-  };
-}
-
-// JSON numbers lose precision past 2^53, so larger values are given as decimal strings.
-function jsonInteger(value: bigint): number | string {
-  return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
 }
