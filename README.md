@@ -249,18 +249,34 @@ They share the wall-clock and output limits of a RARS run.
 
 - **`do_file_check`** — dry-run a Questa or ModelSim `.do` script without a simulator. Returns
   the files it compiles, in order, with each one's library, VHDL standard and whether it exists,
-  plus the `vlib` libraries, the `vsim` top and any Tcl error with its file and line. `std` sets
-  the standard for `vcom` calls that name none.
+  plus the `vlib` libraries, the `vsim` top and any Tcl error with its file, line and `step`, the
+  number of steps recorded before it. `std` sets the standard for `vcom` calls that name none.
 
 `do_file_check` runs the script with `tclsh` 8.5 or later, included in the Docker image.
 For local installations, set `TCLSH` if it is not on `PATH`.
-`vlib`, `vmap`, `vcom`, `vlog`, `vsim`, `run`, `add wave` and the other common Questa
-commands are stubs that record their calls. The script has no shell or file access: nested `do`
-files, `file exists`, `glob` and `pwd` are answered from the workspace. Relative paths resolve from
-the script's folder, as if Questa ran it there, and `pwd` returns that folder. `glob` takes
-`-nocomplain`, `-types f` or `d`, `-directory`, `-tails` and several patterns, returns matches
-sorted and in the form the pattern was written, and fails when a pattern leads outside the
-workspace.
+These Questa commands are stubs that record their calls and return nothing: `vlib`, `vmap`,
+`vcom`, `vlog`, `vopt`, `vsim`, `vdel`, `vdir`, `run`, `step`, `restart`, `force`, `noforce`,
+`change`, `examine`, `describe`, `find`, `when`, `nowhen`, `bp`, `bd`, `add`, `delete`, `wave`,
+`view`, `noview`, `layout`, `config`, `configure`, `radix`, `property`, `virtual`, `bookmark`,
+`log`, `nolog`, `vcd`, `dataset`, `compare`, `mem`, `coverage`, `vcover`, `toggle`, `profile`,
+`assertion`, `simstats`, `write`, `onbreak`, `onerror`, `transcript`, `echo` and `puts`, and also
+`WaveActivateNextPane`, `WaveRestoreCursors`, `WaveRestoreZoom`, `TreeUpdate` and
+`SetDefaultTree` from a saved `wave.do`. `quit` and `exit` end the script, except `quit -sim`, and
+`quietly` runs its command. The script has no shell or file access: nested `do` files,
+`file exists`, `glob`, `pwd` and `cd` are answered from the workspace. Relative paths resolve from
+the script's folder, as if Questa ran it there, and `pwd` returns that folder. `cd` moves to a
+folder in the workspace and fails for a folder outside it. Later paths resolve from the new folder,
+and the `cd` step gives it as `folder`. `glob` takes `-nocomplain`, `-types f` or `d`,
+`-directory`, `-tails` and several patterns, returns matches sorted and in the form the pattern was
+written, and fails when a pattern leads outside the workspace.
+
+The script stops at its first error, as Questa does. After `onerror {resume}`, it continues with
+the next command and records each error. This applies to the `do` file that sets it and to the
+files that file runs. `vcom -f` and `vlog -f` read the list file from the workspace and check each
+entry as if it were written in place of the option. Whitespace separates entries, `#` and `//`
+start comments, and options such as `-2008` apply to the full command. Entries in a `-F` list
+resolve from the list's folder. A list file that cannot be read and a compiled path that is a
+folder are errors.
 
 ## Run in Docker
 

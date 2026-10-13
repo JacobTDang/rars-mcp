@@ -19,12 +19,12 @@ const tclshExecutable = process.env.TCLSH ?? 'tclsh';
 interface CheckReport {
   ok: boolean;
   cwd: string;
-  steps: Array<{ command: string; args: string[] }>;
-  compiles: Array<{ file: string; resolved: string; exists: boolean; library: string; std?: string; order: number }>;
+  steps: Array<{ command: string; args: string[]; folder?: string }>;
+  compiles: Array<{ file: string; resolved: string; exists: boolean; library: string; std?: string; list?: string; order: number }>;
   missing: string[];
   libraries: string[];
   simulate?: { top?: string; args: string[] };
-  errors: Array<{ message: string; file?: string; line?: number }>;
+  errors: Array<{ message: string; file?: string; line?: number; step?: number }>;
 }
 
 // Canonical, as the temporary folder may sit behind a symlink.
@@ -101,7 +101,7 @@ describe('do_file_check', () => {
   it('reports a Tcl syntax error with its line and keeps the steps before it', async () => {
     const { result, text, report, root } = await check({ path: 'syntax.do' });
 
-    expect(report.errors).toEqual([{ file: join(root, 'syntax.do'), line: 3, message: 'missing close-brace' }]);
+    expect(report.errors).toEqual([{ file: join(root, 'syntax.do'), line: 3, message: 'missing close-brace', step: 2 }]);
     expect(report.steps.map((step) => step.command)).toEqual(['vlib', 'vcom']);
     expect(report.ok).toBe(false);
     expect(result.isError).toBe(true);
@@ -111,7 +111,7 @@ describe('do_file_check', () => {
   it('reports an error inside a nested do file once, at its own file and line', async () => {
     const { report, root } = await check({ path: 'nested-error.do' });
 
-    expect(report.errors).toEqual([{ file: join(root, 'syntax.do'), line: 3, message: 'missing close-brace' }]);
+    expect(report.errors).toEqual([{ file: join(root, 'syntax.do'), line: 3, message: 'missing close-brace', step: 4 }]);
     expect(report.steps.map((step) => step.command)).toEqual(['vlib', 'do', 'vlib', 'vcom']);
     expect(report.simulate).toBeUndefined();
   });
@@ -151,7 +151,7 @@ describe('do_file_check', () => {
 
     const { report } = await check({ path: 'run.do' }, root);
 
-    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 3, message: 'No such file: absent.do' }]);
+    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 3, message: 'No such file: absent.do', step: 2 }]);
     expect(report.ok).toBe(false);
   });
 
@@ -164,7 +164,7 @@ describe('do_file_check', () => {
     expect(report.compiles).toEqual([expect.objectContaining({ file: '../outside.vhd', exists: false })]);
     expect(report.missing).toEqual([]);
     expect(report.errors).toEqual([
-      { file: join(root, 'run.do'), line: 2, message: 'Path is outside the workspace folders: ../outside.do' },
+      { file: join(root, 'run.do'), line: 2, message: 'Path is outside the workspace folders: ../outside.do', step: 2 },
       { message: 'Compiled file is outside the workspace folders: ../outside.vhd' },
     ]);
   });
@@ -174,7 +174,7 @@ describe('do_file_check', () => {
 
     const { report } = await check({ path: 'run.do' }, root);
 
-    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 1, message: 'invalid command name "exec"' }]);
+    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 1, message: 'invalid command name "exec"', step: 0 }]);
     await expect(access(join(root, 'pwned'))).rejects.toThrow();
   });
 
@@ -225,10 +225,11 @@ describe('do_file_check', () => {
     const root = join(parent, 'project');
     await symlink(join(parent, 'outside'), join(root, 'link'));
 
-    for (const [script, line, path] of [['parent.do', 6, '..'], ['directory.do', 2, '../outside'], ['link.do', 2, 'link']] as const) {
+    const scripts = [['parent.do', 6, '..', 0], ['directory.do', 2, '../outside', 1], ['link.do', 2, 'link', 1]] as const;
+    for (const [script, line, path, step] of scripts) {
       const { result, report } = await check({ path: script }, root);
 
-      expect(report.errors).toEqual([{ file: join(root, script), line, message: `Path is outside the workspace folders: ${path}` }]);
+      expect(report.errors).toEqual([{ file: join(root, script), line, message: `Path is outside the workspace folders: ${path}`, step }]);
       expect(report.compiles).toEqual([]);
       expect(JSON.stringify(report)).not.toContain('secret');
       expect(result.isError).toBe(true);
@@ -305,7 +306,7 @@ describe('do_file_check', () => {
       'glob cannot expand ~ in a dry run: ~/*.vhd',
       'wrong # args: should be "pwd"',
     ]);
-    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 12, message: 'glob -join is not available in a dry run' }]);
+    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 12, message: 'glob -join is not available in a dry run', step: 11 }]);
     expect(report.compiles).toEqual([]);
   });
 
@@ -320,6 +321,273 @@ describe('do_file_check', () => {
     expect(report.steps.map((step) => step.command)).toEqual(['puts', 'vsim', 'quit', 'vcom', 'quit']);
     expect(report.compiles.map((entry) => entry.file)).toEqual(['a.vhd']);
     expect(report.errors).toEqual([]);
+  });
+
+  it('runs a Questa tutorial script and the wave.do it loads through to the end', async () => {
+    const { result, report } = await check({ path: 'tutorial.do' });
+
+    expect(report.errors).toEqual([]);
+    expect(report.steps.map((step) => step.command)).toEqual([
+      'onbreak', 'transcript', 'vlib', 'vmap', 'vcom', 'vsim', 'do',
+      'onerror', 'WaveActivateNextPane', 'add', 'add', 'add', 'SetDefaultTree', 'TreeUpdate', 'WaveRestoreCursors', 'wave',
+      ...Array<string>(13).fill('configure'), 'WaveRestoreZoom',
+      'log', 'nolog', 'property', 'vcd', 'vcd', 'when', 'bp', 'force', 'run', 'examine', 'echo', 'bookmark', 'step', 'bd',
+      'nowhen', 'noforce', 'run', 'wave', 'write', 'coverage', 'simstats', 'quit',
+    ]);
+    expect(report.steps.find((step) => step.command === 'when')?.args)
+      .toEqual(['-label', 'reached', '/counter_tb/count = "1000"', '\n  echo "count reached 8 at $now"\n  stop\n']);
+    expect(report.compiles.map(({ file, exists }) => ({ file, exists }))).toEqual([
+      { file: 'rtl/counter.vhd', exists: true },
+      { file: 'tb/counter_tb.vhd', exists: true },
+    ]);
+    expect(report.simulate?.top).toBe('work.counter_tb');
+    expect(report.ok).toBe(true);
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('records the other Questa simulator commands as steps and carries on', async () => {
+    const commands = [
+      'when', 'nowhen', 'examine', 'describe', 'find', 'bp', 'bd', 'bookmark', 'step', 'change', 'vcd', 'nolog', 'property',
+      'delete', 'virtual', 'dataset', 'compare', 'mem', 'coverage', 'vcover', 'toggle', 'profile', 'assertion', 'layout',
+      'noview', 'write', 'simstats', 'vdir', 'WaveActivateNextPane', 'WaveRestoreCursors', 'WaveRestoreZoom', 'TreeUpdate',
+      'SetDefaultTree',
+    ];
+    const root = await scratchWorkspace({ 'run.do': `${commands.map((command) => `${command} -option value`).join('\n')}\nvsim tb\n` });
+
+    const { report } = await check({ path: 'run.do' }, root);
+
+    expect(report.errors).toEqual([]);
+    expect(report.steps).toEqual([
+      ...commands.map((command) => ({ command, args: ['-option', 'value'] })),
+      { command: 'vsim', args: ['tb'] },
+    ]);
+  });
+
+  it('resolves paths from the folder cd moves to and reports each move', async () => {
+    const root = await scratchWorkspace({
+      'rtl/a.vhd': '', 'rtl/b.vhd': '', 'rtl/files.txt': 'b.vhd\n', 'tb/tb.vhd': '', 'tb/setup.do': 'cd ../tb\n',
+      'run.do': [
+        'cd rtl',
+        'vcom a.vhd',
+        'puts [pwd]',
+        'puts [glob *.vhd]',
+        'puts [file exists b.vhd]',
+        'vcom -f files.txt',
+        'do ../tb/setup.do',
+        'vcom tb.vhd',
+        'cd ..',
+        'vcom rtl/b.vhd',
+      ].join('\n'),
+    });
+
+    const { result, text, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.errors).toEqual([]);
+    expect(report.steps).toEqual([
+      { command: 'cd', args: ['rtl'], folder: join(root, 'rtl') },
+      { command: 'vcom', args: ['a.vhd'] },
+      { command: 'puts', args: [join(root, 'rtl')] },
+      { command: 'puts', args: ['a.vhd b.vhd'] },
+      { command: 'puts', args: ['1'] },
+      { command: 'vcom', args: ['-f', 'files.txt'] },
+      { command: 'do', args: ['../tb/setup.do'] },
+      { command: 'cd', args: ['../tb'], folder: join(root, 'tb') },
+      { command: 'vcom', args: ['tb.vhd'] },
+      { command: 'cd', args: ['..'], folder: root },
+      { command: 'vcom', args: ['rtl/b.vhd'] },
+    ]);
+    expect(report.compiles.map(({ file, resolved, exists }) => ({ file, resolved, exists }))).toEqual([
+      { file: 'a.vhd', resolved: join(root, 'rtl/a.vhd'), exists: true },
+      { file: 'b.vhd', resolved: join(root, 'rtl/b.vhd'), exists: true },
+      { file: 'tb.vhd', resolved: join(root, 'tb/tb.vhd'), exists: true },
+      { file: 'rtl/b.vhd', resolved: join(root, 'rtl/b.vhd'), exists: true },
+    ]);
+    expect(report.cwd).toBe(root);
+    expect(report.ok).toBe(true);
+    expect(result.isError).toBeFalsy();
+    expect(text).toContain(`cd moves to ${join(root, 'rtl')}, then ${join(root, 'tb')}, then ${root}.`);
+    expect(text).toContain('1. a.vhd (rtl/a.vhd) into work');
+    expect(text).toContain('4. rtl/b.vhd into work');
+  });
+
+  it('refuses a cd outside the workspace, to a missing folder or to a file', async () => {
+    const parent = await scratchWorkspace({ 'outside/secret.vhd': '', 'project/a.vhd': '', 'project/sub/b.vhd': '' });
+    const root = join(parent, 'project');
+    await symlink(join(parent, 'outside'), join(root, 'link'));
+    const attempts = ['cd ..', 'cd link', 'cd absent', 'cd a.vhd', 'cd', 'cd sub extra', 'cd ~', 'cd ~/sub']
+      .map((command) => `catch {${command}} message; puts $message`);
+    await writeFile(join(root, 'run.do'), `${attempts.join('\n')}\nputs [pwd]\ncd ../..\nvcom never.vhd\n`);
+
+    const { result, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.steps.filter((step) => step.command === 'puts').map((step) => step.args[0])).toEqual([
+      'Path is outside the workspace folders: ..',
+      'Path is outside the workspace folders: link',
+      'couldn\'t change working directory to "absent": no such file or directory',
+      'couldn\'t change working directory to "a.vhd": not a directory',
+      'cd without a folder is not available in a dry run',
+      'wrong # args: should be "cd ?dirName?"',
+      'cd cannot expand ~ in a dry run: ~',
+      'cd cannot expand ~ in a dry run: ~/sub',
+      root,
+    ]);
+    expect(report.steps.filter((step) => step.command === 'cd')).toEqual([
+      { command: 'cd', args: ['..'] }, { command: 'cd', args: ['link'] }, { command: 'cd', args: ['absent'] },
+      { command: 'cd', args: ['a.vhd'] }, { command: 'cd', args: [] }, { command: 'cd', args: ['sub', 'extra'] },
+      { command: 'cd', args: ['~'] }, { command: 'cd', args: ['~/sub'] }, { command: 'cd', args: ['../..'] },
+    ]);
+    expect(report.errors).toEqual([
+      { file: join(root, 'run.do'), line: 10, message: 'Path is outside the workspace folders: ../..', step: 18 },
+    ]);
+    expect(report.compiles).toEqual([]);
+    expect(JSON.stringify(report)).not.toContain('secret');
+    expect(result.isError).toBe(true);
+  });
+
+  it('keeps each lookup answer on one line when a path has a line break', async () => {
+    const script = 'catch {cd "x\\ny"} message; puts $message\ncatch {do "x\\ny"} message; puts $message\nputs [file exists rtl]\n';
+    const root = await scratchWorkspace({ 'rtl/a.vhd': '', 'run.do': script });
+
+    const { report } = await check({ path: 'run.do' }, root);
+
+    expect(report.errors).toEqual([]);
+    expect(report.steps.filter((step) => step.command === 'puts').map((step) => step.args[0])).toEqual([
+      'couldn\'t change working directory to "x y": no such file or directory',
+      'No such file: x y',
+      '1',
+    ]);
+  });
+
+  it('continues past errors after onerror {resume}, recording each with the steps before it', async () => {
+    const root = await scratchWorkspace({
+      'a.vhd': '',
+      'run.do': 'onerror { resume }\nvlib work\nbogus arg\nvcom a.vhd\ndo absent.do\nif {1} {\n  error "inside a block"\n}\nvsim tb\n',
+    });
+
+    const { result, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.steps.map((step) => step.command)).toEqual(['onerror', 'vlib', 'vcom', 'do', 'vsim']);
+    expect(report.errors).toEqual([
+      { file: join(root, 'run.do'), line: 3, message: 'invalid command name "bogus"', step: 2 },
+      { file: join(root, 'run.do'), line: 5, message: 'No such file: absent.do', step: 4 },
+      { file: join(root, 'run.do'), line: 7, message: 'inside a block', step: 4 },
+    ]);
+    expect(report.compiles.map((entry) => entry.file)).toEqual(['a.vhd']);
+    expect(report.simulate?.top).toBe('tb');
+    expect(report.ok).toBe(false);
+    expect(result.isError).toBe(true);
+  });
+
+  it('stops at the first error with onerror {quit -f}, with no handler, and once the handler is cleared', async () => {
+    const scripts = {
+      'quit.do': 'onerror {quit -f}\nvlib work\nbogus\nvcom never.vhd\n',
+      'none.do': 'vlib work\nbogus\nvcom never.vhd\n',
+      'cleared.do': 'onerror {resume}\nbogus\nonerror {}\nbogus\nvcom never.vhd\n',
+      'quits.do': 'onerror {resume}\nquit -f\nvcom never.vhd\n',
+    };
+    const root = await scratchWorkspace(scripts);
+
+    const results = await Promise.all(Object.keys(scripts).map(async (path) => (await check({ path }, root)).report));
+
+    expect(results.map((report) => report.steps.map((step) => step.command))).toEqual([
+      ['onerror', 'vlib'], ['vlib'], ['onerror', 'onerror'], ['onerror', 'quit'],
+    ]);
+    expect(results.map((report) => report.errors.map(({ line, step }) => ({ line, step })))).toEqual([
+      [{ line: 3, step: 2 }], [{ line: 2, step: 1 }], [{ line: 2, step: 1 }, { line: 4, step: 2 }], [],
+    ]);
+    expect(results.every((report) => report.compiles.length === 0)).toBe(true);
+  });
+
+  it('applies onerror to the do file that sets it and the files it runs', async () => {
+    const root = await scratchWorkspace({
+      'a.vhd': '',
+      'wave.do': 'onerror {resume}\nbad_in_wave\nadd wave /tb/x\n',
+      'loads-wave.do': 'do wave.do\nbad_after_wave\nvcom a.vhd\n',
+      'inner.do': 'bad_inner\nvlog b.v\n',
+      'inherits.do': 'onerror {resume}\ndo inner.do\nvcom a.vhd\n',
+      'strict.do': 'onerror {}\nbad_strict\nvlog never.v\n',
+      'resumes-after-nested.do': 'onerror {resume}\ndo strict.do\nvcom a.vhd\n',
+    });
+
+    const loadsWave = (await check({ path: 'loads-wave.do' }, root)).report;
+    expect(loadsWave.steps.map((step) => step.command)).toEqual(['do', 'onerror', 'add']);
+    expect(loadsWave.errors).toEqual([
+      { file: join(root, 'wave.do'), line: 2, message: 'invalid command name "bad_in_wave"', step: 2 },
+      { file: join(root, 'loads-wave.do'), line: 2, message: 'invalid command name "bad_after_wave"', step: 3 },
+    ]);
+
+    const inherits = (await check({ path: 'inherits.do' }, root)).report;
+    expect(inherits.steps.map((step) => step.command)).toEqual(['onerror', 'do', 'vlog', 'vcom']);
+    expect(inherits.errors).toEqual([{ file: join(root, 'inner.do'), line: 1, message: 'invalid command name "bad_inner"', step: 2 }]);
+
+    const resumes = (await check({ path: 'resumes-after-nested.do' }, root)).report;
+    expect(resumes.steps.map((step) => step.command)).toEqual(['onerror', 'do', 'onerror', 'vcom']);
+    expect(resumes.errors).toEqual([{ file: join(root, 'strict.do'), line: 2, message: 'invalid command name "bad_strict"', step: 3 }]);
+  });
+
+  it('reports a compiled path that is a folder as a folder, not as missing', async () => {
+    const root = await scratchWorkspace({ 'rtl/a.vhd': '', 'run.do': 'vcom rtl\nvlog rtl/\n' });
+
+    const { result, text, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.compiles.map(({ file, exists }) => ({ file, exists }))).toEqual([{ file: 'rtl', exists: true }, { file: 'rtl/', exists: true }]);
+    expect(report.missing).toEqual([]);
+    expect(report.errors).toEqual([
+      { message: 'Compiled path is a directory, not a file: rtl' },
+      { message: 'Compiled path is a directory, not a file: rtl/' },
+    ]);
+    expect(text).toContain('2 files to compile, 0 missing.');
+    expect(text).toContain('1. rtl into work, a directory');
+    expect(result.isError).toBe(true);
+  });
+
+  it('compiles the files a vcom -f list names, as if written inline', async () => {
+    const root = await scratchWorkspace({
+      'rtl/pkg.vhd': '', 'rtl/a.vhd': '', 'tb/tb.vhd': '',
+      'files.txt': '# RTL, packages first\n-2008\nrtl/pkg.vhd\n\nrtl/a.vhd   # the ALU\n// a Verilog-style comment\r\nrtl/absent.vhd\n-f lists/more.txt\n',
+      'lists/more.txt': 'tb/tb.vhd',
+      'run.do': 'vlib mylib\nvcom -work mylib -f files.txt\nvsim mylib.tb\n',
+    });
+
+    const { result, text, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.steps[1]).toEqual({ command: 'vcom', args: ['-work', 'mylib', '-f', 'files.txt'] });
+    expect(report.compiles).toEqual([
+      { file: 'rtl/pkg.vhd', resolved: join(root, 'rtl/pkg.vhd'), exists: true, library: 'mylib', std: '2008', list: 'files.txt', order: 1 },
+      { file: 'rtl/a.vhd', resolved: join(root, 'rtl/a.vhd'), exists: true, library: 'mylib', std: '2008', list: 'files.txt', order: 2 },
+      { file: 'rtl/absent.vhd', resolved: join(root, 'rtl/absent.vhd'), exists: false, library: 'mylib', std: '2008', list: 'files.txt', order: 3 },
+      { file: 'tb/tb.vhd', resolved: join(root, 'tb/tb.vhd'), exists: true, library: 'mylib', std: '2008', list: 'lists/more.txt', order: 4 },
+    ]);
+    expect(report.missing).toEqual(['rtl/absent.vhd']);
+    expect(report.errors).toEqual([]);
+    expect(text).toContain('3. rtl/absent.vhd into mylib, std 2008, listed in files.txt, missing');
+    expect(result.isError).toBe(true);
+  });
+
+  it('resolves a -F list from its own folder and names a list file it cannot read', async () => {
+    const parent = await scratchWorkspace({
+      'outside.f': 'secret.vhd\n',
+      'project/a.vhd': '', 'project/end.vhd': '', 'project/ip/core.vhd': '', 'project/ip/sources.f': 'core.vhd\n',
+      'project/loop.f': '-f loop.f\nend.vhd\n',
+      'project/run.do': 'vcom -F ip/sources.f\nvcom -f absent.txt a.vhd\nvlog -f ip\nvcom -f ../outside.f\nvcom -f loop.f\n',
+    });
+    const root = join(parent, 'project');
+
+    const { result, report } = await check({ path: 'run.do' }, root);
+
+    expect(report.compiles.map(({ file, resolved, exists, list }) => ({ file, resolved, exists, list }))).toEqual([
+      { file: 'core.vhd', resolved: join(root, 'ip/core.vhd'), exists: true, list: 'ip/sources.f' },
+      { file: 'a.vhd', resolved: join(root, 'a.vhd'), exists: true, list: undefined },
+      { file: 'end.vhd', resolved: join(root, 'end.vhd'), exists: true, list: 'loop.f' },
+    ]);
+    expect(report.errors).toEqual([
+      { message: 'No such list file: absent.txt' },
+      { message: 'List file is not a file: ip' },
+      { message: 'List file is outside the workspace folders: ../outside.f' },
+      { message: 'List file includes itself: loop.f' },
+    ]);
+    expect(JSON.stringify(report)).not.toContain('secret');
+    expect(result.isError).toBe(true);
   });
 
   it('stops a script that runs past the time limit', async () => {
@@ -351,17 +619,30 @@ describe('do_file_check', () => {
 });
 
 describe('analyzeSteps', () => {
-  it('skips vlog options and their values', () => {
-    const analysis = analyzeSteps([
+  it('skips vlog options and their values, reads -f lists and follows cd', async () => {
+    const lists: Record<string, string> = { '/project/files.f': '-93 b.vhd\n', '/project/sim/tb.f': 'tb.vhd\n' };
+    const readList = async (path: string, folder: string) => {
+      const listPath = join(folder, path);
+      const text = lists[listPath];
+      return text === undefined ? { error: `No such list file: ${path}` } : { path: listPath, text };
+    };
+
+    const analysis = await analyzeSteps([
       { command: 'vlog', args: ['-sv', '+incdir+inc', '-work', 'lib', '-L', 'other', 'top.sv', 'pkg.sv'] },
       { command: 'vcom', args: ['-f', 'files.f', '-suppress', '1234', 'a.vhd'] },
-    ]);
+      { command: 'vcom', args: ['-f', 'absent.f'] },
+      { command: 'cd', args: ['sim'], folder: '/project/sim' },
+      { command: 'vcom', args: ['-f', 'tb.f'] },
+    ], { folder: '/project', readList });
 
     expect(analysis.compiles).toEqual([
-      { file: 'top.sv', library: 'lib', std: 'sv', order: 1 },
-      { file: 'pkg.sv', library: 'lib', std: 'sv', order: 2 },
-      { file: 'a.vhd', library: 'work', order: 3 },
+      { file: 'top.sv', folder: '/project', library: 'lib', std: 'sv', order: 1 },
+      { file: 'pkg.sv', folder: '/project', library: 'lib', std: 'sv', order: 2 },
+      { file: 'b.vhd', folder: '/project', library: 'work', std: '93', list: 'files.f', order: 3 },
+      { file: 'a.vhd', folder: '/project', library: 'work', std: '93', order: 4 },
+      { file: 'tb.vhd', folder: '/project/sim', library: 'work', list: 'tb.f', order: 5 },
     ]);
+    expect(analysis.errors).toEqual([{ message: 'No such list file: absent.f' }]);
   });
 });
 
