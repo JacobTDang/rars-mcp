@@ -64,8 +64,13 @@ path, because writing through it would create its target. Folders come from, in 
 
 - **`rars_assemble`** — assemble source files and return structured diagnostics.
 - **`rars_run`** — run them. Options: `stdin`, `programArgs`, `registers`, `memoryRanges`,
-  `instructionCount`, `maxSteps`, `timeoutMs`. Requested registers and memory come back as
-  structured values, not raw RARS text:
+  `instructionCount`, `maxSteps`, `timeoutMs`. `registers` takes `x0`-`x31`, `zero`, `ra`, `sp`,
+  `gp`, `tp`, `fp`, `t0`-`t6`, `s0`-`s11`, `a0`-`a7`, `f0`-`f31`, `ft0`-`ft11`, `fs0`-`fs11`,
+  `fa0`-`fa7`, and the CSRs `ustatus`, `fflags`, `frm`, `fcsr`, `uie`, `utvec`, `uscratch`, `uepc`,
+  `ucause`, `utval`, `uip`, `cycle`, `time`, `instret`, `cycleh`, `timeh` and `instreth`. The RARS
+  command line cannot print `pc`; read it with `rars_inspect`. `memoryRanges` takes word-aligned
+  ranges such as `0x10010000-0x1001000c`, both ends included. Requested registers and memory come
+  back as structured values, not raw RARS text:
 
   ```json
   { "registers": { "t0": { "hex": "0xfffff000", "signed": -4096 } },

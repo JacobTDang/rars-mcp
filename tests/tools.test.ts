@@ -2,10 +2,13 @@ import { access, copyFile, mkdtemp, readdir, readFile, realpath, symlink, writeF
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
 
 import { runRars } from '../src/rars/cli.js';
+import { createMcpServer } from '../src/server.js';
 import { SessionStore } from '../src/sessions/store.js';
-import { createToolHandlers } from '../src/tools/handlers.js';
+import { createToolHandlers, type ToolDependencies } from '../src/tools/handlers.js';
 import { assembleSchema, dumpSchema, runSchema } from '../src/tools/schemas.js';
 import { Workspace } from '../src/workspace.js';
 
@@ -313,6 +316,85 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
   });
 });
 
+describe.runIf(process.env.RARS_JAR)('rars_run register and memory options on the MCP server with RARS', () => {
+  async function connect() {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const deps: ToolDependencies = {
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    };
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createMcpServer(deps);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const run = async (input: Record<string, unknown>) => {
+      const result = await client.callTool({ name: 'rars_run', arguments: { files: ['hello.asm'], ...input } });
+      return { isError: result.isError, text: (result.content as Array<{ text: string }>).map((item) => item.text).join('\n') };
+    };
+    return { handlers: createToolHandlers(deps), run, close: async () => { await client.close(); await server.close(); } };
+  }
+
+  it('refuses pc and points to rars_inspect', async () => {
+    const { run, close } = await connect();
+    try {
+      const result = await run({ registers: ['a0', 'pc'] });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('registers.1: "pc"');
+      expect(result.text).toContain('rars_inspect');
+    } finally {
+      await close();
+    }
+  });
+
+  it('refuses register entries that RARS would take as a dump to a file outside the workspace', async () => {
+    const { handlers, run, close } = await connect();
+    const outside = join(await mkdtemp(join(tmpdir(), 'rars-outside-')), 'escaped.hex');
+    const registers = ['dump', '.text', 'HexText', outside];
+    try {
+      const result = await run({ registers });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('registers.0: "dump" is not a register');
+      await expect(access(outside)).rejects.toMatchObject({ code: 'ENOENT' });
+      // A direct handler call skips the tool schema.
+      await expect(handlers.run({ files: ['hello.asm'], registers })).rejects.toThrow('"dump" is not a register');
+      await expect(access(outside)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await close();
+    }
+  });
+
+  it('refuses a, which RARS takes as assemble only', async () => {
+    const { run, close } = await connect();
+    try {
+      const result = await run({ registers: ['a'] });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('registers.0: "a" is not a register');
+    } finally {
+      await close();
+    }
+  });
+
+  it('refuses memory ranges RARS does not take', async () => {
+    const { run, close } = await connect();
+    try {
+      for (const [range, message] of [['foo', 'is not a memory range'], ['0x10010004-0x10010000', 'lower address first']]) {
+        const result = await run({ memoryRanges: [range], instructionCount: true });
+
+        expect(result.isError, range).toBe(true);
+        expect(result.text, range).toContain(`memoryRanges.0: "${range}" `);
+        expect(result.text, range).toContain(message);
+      }
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
   it('writes a memory image inside the workspace and reports it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
@@ -518,6 +600,24 @@ describe('headless tool handlers', () => {
     }]);
   });
 
+  it.each([
+    'Invalid Command Argument: pc',
+    'Invalid/unaligned address or invalid range: 0x10010004-0x10010000',
+  ])('reports a run whose argument RARS rejected as an error: %s', async (line) => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'main.asm'), 'nop');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: `${line}\n`, timedOut: false, truncated: false }),
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['main.asm'], registers: ['a0'], memoryRanges: ['0x10010000-0x10010000'], instructionCount: true });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: expect.stringContaining(line) }]);
+  });
+
   it('reports timeouts as readable run results', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await writeFile(join(root, 'loop.asm'), 'loop');
@@ -658,6 +758,50 @@ describe('inline source schemas', () => {
     expect(result.error?.issues).toContainEqual(expect.objectContaining({
       message: 'source names must be unique',
     }));
+  });
+});
+
+describe('run register and memory range schema', () => {
+  const issues = (input: Record<string, unknown>) => runSchema.safeParse({ files: ['main.s'], ...input }).error?.issues;
+
+  it('accepts the register names and word-aligned ranges RARS prints', () => {
+    expect(issues({
+      registers: ['x0', 'x31', 'zero', 'fp', 's11', 'a7', 'f0', 'f31', 'ft11', 'fs11', 'fa7', 'fcsr', 'instreth'],
+      memoryRanges: ['0x10010000-0x10010000', '0x10010000-0x1001000C', '0x80000000-0xfffffffc'],
+    })).toBeUndefined();
+  });
+
+  it('refuses pc and points to rars_inspect', () => {
+    expect(issues({ registers: ['a0', 'pc'] })).toEqual([expect.objectContaining({
+      path: ['registers', 1], message: expect.stringMatching(/^"pc" .*rars_inspect/),
+    })]);
+  });
+
+  it.each(['a', 'dump', '.text', 'HexText', '/tmp/outside.hex', 'ic', '5', 'A0', 'x32', 'x05', 'hi', 'lo', ''])(
+    'refuses the register %j',
+    (name) => {
+      expect(issues({ registers: [name] })).toEqual([expect.objectContaining({
+        path: ['registers', 0], message: expect.stringContaining(`${JSON.stringify(name)} is not a register`),
+      })]);
+    },
+  );
+
+  it.each([
+    ['foo', 'is not a memory range'],
+    ['0x10010000', 'is not a memory range'],
+    ['268500992-268500996', 'is not a memory range'],
+    ['0x10010000-0x10010004 ', 'is not a memory range'],
+    ['0x10010004-0x10010000', 'lower address first'],
+    ['0x10010001-0x10010004', 'word boundary'],
+    ['0x10010000-0x10010006', 'word boundary'],
+    ['0x100000000-0x100000004', 'above 0xffffffff'],
+    ['0x7ffffffc-0x80000000', 'spans 0x80000000'],
+  ])('refuses the memory range %j', (range, message) => {
+    const found = issues({ memoryRanges: [range] });
+
+    expect(found).toEqual([expect.objectContaining({ path: ['memoryRanges', 0] })]);
+    expect(found![0]!.message.startsWith(`${JSON.stringify(range)} `)).toBe(true);
+    expect(found![0]!.message).toContain(message);
   });
 });
 

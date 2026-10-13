@@ -1,8 +1,9 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { buildRarsArgs, runRars } from '../src/rars/cli.js';
+import { buildRarsArgs, CLI_REGISTERS, runRars } from '../src/rars/cli.js';
 import { parseDiagnostics } from '../src/rars/diagnostics.js';
+import { extractDumps } from '../src/rars/output.js';
 
 describe('buildRarsArgs', () => {
   it('puts program arguments after all source files', () => {
@@ -37,6 +38,17 @@ describe('buildRarsArgs', () => {
     ]);
   });
 
+  // A direct handler call skips the tool schema, so the builder checks the entries again.
+  it('refuses a register entry that RARS would read as another option', () => {
+    expect(() => buildRarsArgs({
+      mode: 'run', files: ['main.asm'], registers: ['dump', '.text', 'HexText', '/tmp/outside.hex'],
+    })).toThrow('"dump" is not a register');
+  });
+
+  it('refuses a memory range entry that RARS would read as another option', () => {
+    expect(() => buildRarsArgs({ mode: 'run', files: ['main.asm'], memoryRanges: ['a'] })).toThrow('"a" is not a memory range');
+  });
+
   it('uses assemble-only mode', () => {
     expect(buildRarsArgs({ mode: 'assemble', files: ['main.asm'] })).toEqual([
       'nc',
@@ -60,6 +72,18 @@ describe.runIf(process.env.RARS_JAR)('runRars', () => {
 
     expect(result).toMatchObject({ exitCode: 0, timedOut: false, truncated: false });
     expect(result.stdout).toContain('hello from rars');
+  });
+
+  it('prints every register that the run options accept', async () => {
+    const result = await runRars({
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!,
+      cwd: resolve('tests/fixtures'), request: { mode: 'run', files: ['hello.asm'], registers: [...CLI_REGISTERS] },
+      timeoutMs: 10_000, maxOutputBytes: 64 * 1024,
+    });
+
+    expect(result.stdout).toContain('hello from rars');
+    expect(result.stderr).not.toContain('Invalid');
+    expect(Object.keys(extractDumps(result.stderr).registers)).toEqual([...CLI_REGISTERS]);
   });
 
   it('returns structured assembly diagnostics', async () => {
