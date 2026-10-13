@@ -12,13 +12,13 @@ import { describeRun, files, identifier, std, stopTime, type VhdlToolDependencie
 // Built-in mutations run every testbench once each, so their number is bounded.
 const MUTATION_LIMIT = 64;
 
-export const vhdlMutateSchema = z.object({
+export const vhdlMutateSchema = z.strictObject({
   file: z.string().min(1).describe('Design file to mutate; every testbench must list it in its files'),
-  testbenches: z.array(z.object({
+  testbenches: z.array(z.strictObject({
     top: identifier.describe('Testbench entity to elaborate and run'),
     files,
   })).min(1).describe('Testbenches to score; one catches a mutation when it exits non-zero or raises an error assertion'),
-  mutations: z.array(z.object({
+  mutations: z.array(z.strictObject({
     name: z.string().min(1).describe('Label for the results, "find -> replace" by default').optional(),
     find: z.string().min(1).describe('Exact text to replace'),
     replace: z.string().describe('Text to put in its place'),

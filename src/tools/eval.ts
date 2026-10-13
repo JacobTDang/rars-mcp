@@ -68,7 +68,7 @@ const caseSchema = z.strictObject({
     }
   }
 });
-export const evalSchema = z.object({
+export const evalSchema = z.strictObject({
   cases: z.array(caseSchema).min(1).max(1024),
   format: z.enum(['json', 'vhdl']).describe('vhdl also returns a constant table for a testbench').optional(),
 });

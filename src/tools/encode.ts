@@ -5,7 +5,7 @@ import type { ToolDependencies, ToolResult } from './handlers.js';
 
 const maxInstructions = 200;
 
-export const encodeSchema = z.object({
+export const encodeSchema = z.strictObject({
   instructions: z.array(z.string().min(1, 'An instruction cannot be empty').regex(/^[^\r\n]*$/, 'An instruction must fit on one line'))
     .min(1).max(maxInstructions)
     .describe(`Up to ${maxInstructions} assembly instructions, assembled one after another as one program, so a label on `

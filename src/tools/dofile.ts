@@ -7,7 +7,7 @@ import { analyzeSteps, runDoFile, vhdlStandards, type DoFileError, type DoFileSt
 import type { Workspace } from '../workspace.js';
 import type { ToolDependencies, ToolResult } from './handlers.js';
 
-export const doFileCheckSchema = z.object({
+export const doFileCheckSchema = z.strictObject({
   path: z.string().min(1).describe('The .do file to check'),
   std: z.enum(vhdlStandards).describe('VHDL standard for vcom calls that name none, as in vcom -2008').optional(),
 });
