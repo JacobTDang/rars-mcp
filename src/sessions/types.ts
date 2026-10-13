@@ -29,7 +29,15 @@ export interface MachineState {
   exception?: string;
   programCounter?: string;
   registers?: Readonly<Record<string, Word>>;
-  output?: string;
+  // The program's output written since the previous reply from this session, so '' when there is none.
+  stdout?: string;
+  stderr?: string;
+  // Bytes of each stream handed over since the program was loaded or reset, this reply's included.
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  // stdout and stderr together keep at most RARS_MAX_OUTPUT_BYTES from one run, as rars_run does;
+  // past that the rest is dropped and this is true until a reset.
+  truncated?: boolean;
 }
 
 export type DebugCommand =

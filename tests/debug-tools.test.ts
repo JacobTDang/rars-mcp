@@ -105,4 +105,40 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     expect((await handlers.inspect({ sessionId, registers: ['t1'] })).structuredContent).toMatchObject({ registers: { t1: { signed: 102 } } });
     await handlers.sessionClose({ sessionId });
   });
+
+  it('caps program output at the output limit and returns only what is new in each reply', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 3000,
+      maxOutputBytes: 4096, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+    const line = '0123456789abcdef\n';
+    const started = await handlers.debugStart({
+      source: `.data\nline: .asciz "0123456789abcdef\\n"\n.text\nmain:\n  la a0, line\n  li a7, 4\nprint:\n  ecall\n  j print\n`,
+    });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+    const command = async (input: Omit<Parameters<typeof handlers.debugCommand>[0], 'sessionId'>) =>
+      (await handlers.debugCommand({ sessionId, ...input })).structuredContent;
+    const inspect = async () => (await handlers.inspect({ sessionId })).structuredContent;
+
+    // la is two instructions, so the fourth is the first ecall.
+    expect(await command({ action: 'continue', maxSteps: 4 }))
+      .toMatchObject({ stdout: line, stderr: '', stdoutBytes: 17, stderrBytes: 0, truncated: false });
+    expect(await inspect()).toMatchObject({ stdout: '', stderr: '', stdoutBytes: 17, truncated: false });
+    expect(await command({ action: 'step' })).toMatchObject({ stdout: '', stdoutBytes: 17 });
+    expect(await command({ action: 'step' })).toMatchObject({ stdout: line, stdoutBytes: 34, truncated: false });
+
+    expect(await command({ action: 'continue', maxSteps: 100_000 })).toMatchObject({
+      stopReason: 'step_limit', stdout: line.repeat(Math.ceil(4096 / 17)).slice(34, 4096), stderr: '',
+      stdoutBytes: 4096, stderrBytes: 0, truncated: true,
+    });
+    expect(await command({ action: 'step' })).toMatchObject({ stdout: '', stderr: '', stdoutBytes: 4096, truncated: true });
+    expect(await inspect()).toMatchObject({ stdout: '', stderr: '', stdoutBytes: 4096, truncated: true });
+
+    expect(await command({ action: 'reset' })).toMatchObject({ stdout: '', stdoutBytes: 0, truncated: false });
+    expect(await command({ action: 'continue', maxSteps: 4 })).toMatchObject({ stdout: line, stdoutBytes: 17, truncated: false });
+    await handlers.sessionClose({ sessionId });
+  });
 });

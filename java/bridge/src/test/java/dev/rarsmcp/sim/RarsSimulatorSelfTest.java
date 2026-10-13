@@ -18,8 +18,10 @@ import java.util.Map;
 import java.util.Objects;
 
 public final class RarsSimulatorSelfTest {
+    private static final long OUTPUT_LIMIT = 1 << 20;
+
     public static void main(String[] args) throws Exception {
-        RarsSimulator simulator = new RarsSimulator();
+        RarsSimulator simulator = new RarsSimulator(OUTPUT_LIMIT);
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         Map<String, Object> initial = simulator.snapshot();
         long initialPc = pc(initial);
@@ -151,13 +153,14 @@ public final class RarsSimulatorSelfTest {
 
         modify();
         storeChecks();
+        output();
         encode();
         System.out.println("RarsSimulatorSelfTest PASS");
     }
 
     // A rejected request changes nothing, whichever entry is wrong.
     private static void modify() throws Exception {
-        RarsSimulator simulator = new RarsSimulator();
+        RarsSimulator simulator = new RarsSimulator(OUTPUT_LIMIT);
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         Map<String, Object> none = Collections.emptyMap();
 
@@ -197,10 +200,67 @@ public final class RarsSimulatorSelfTest {
         require(memory(simulator, 0x10010000) == 0x55 && memory(simulator, 0x10010004) == 0xfffe, "memory written");
     }
 
+    // stdout and stderr together keep at most the limit per run, and each snapshot has only the output
+    // written since the previous one.
+    private static void output() throws Exception {
+        String line = "0123456789abcdef\n";
+        Path loop = program("rars-print-loop",
+                ".data\nline: .asciz \"0123456789abcdef\\n\"\n.text\nmain:\n  la a0, line\n  li a7, 4\nprint:\n  ecall\n  j print\n");
+        RarsSimulator simulator = new RarsSimulator(40);
+        simulator.load(Arrays.asList(loop.toString()), Collections.emptyList(), "");
+        requireOutput(simulator.snapshot(), "", 0, "", 0, false, "before the program runs");
+        // la is two instructions, so the fourth is the first ecall.
+        requireOutput(simulator.runUntilStop(4), line, 17, "", 0, false, "first line");
+        requireOutput(simulator.snapshot(), "", 17, "", 0, false, "nothing new");
+        requireOutput(simulator.step(), "", 17, "", 0, false, "the jump prints nothing");
+        requireOutput(simulator.step(), line, 34, "", 0, false, "second line only");
+        requireOutput(simulator.runUntilStop(1000), line.substring(0, 6), 40, "", 0, true, "cut at the limit");
+        requireOutput(simulator.runUntilStop(1000), "", 40, "", 0, true, "nothing past the limit");
+        requireOutput(simulator.reset(), "", 0, "", 0, false, "reset starts the output again");
+        requireOutput(simulator.runUntilStop(4), line, 17, "", 0, false, "first line after reset");
+
+        // A write to stderr counts against the same limit.
+        Path both = program("rars-stderr",
+                ".data\nout: .ascii \"0123456789\"\nerr: .ascii \"abcdefghijklmnopqrstuvwxyz0123456789\"\n.text\nmain:\n"
+                + "  li a0, 1\n  la a1, out\n  li a2, 10\n  li a7, 64\n  ecall\n"
+                + "  li a0, 2\n  la a1, err\n  li a2, 36\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
+        simulator.load(Arrays.asList(both.toString()), Collections.emptyList(), "");
+        requireOutput(simulator.runUntilStop(1000), "0123456789", 10, "abcdefghijklmnopqrstuvwxyz0123", 30, true, "stderr shares the limit");
+
+        // A character written in two parts arrives whole, once its second part is written.
+        Path split = program("rars-split-character",
+                ".data\ne: .byte 0xc3, 0xa9\n.text\nmain:\n  li a0, 1\n  la a1, e\n  li a2, 1\n  li a7, 64\n  ecall\n"
+                + "  li a0, 1\n  addi a1, a1, 1\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
+        simulator.load(Arrays.asList(split.toString()), Collections.emptyList(), "");
+        requireOutput(simulator.runUntilStop(6), "", 0, "", 0, false, "first part held back");
+        requireOutput(simulator.runUntilStop(1000), "\u00e9", 2, "", 0, false, "second part completes the character");
+        // A part that can never be completed is not held back once the run has ended.
+        Path dangling = program("rars-dangling-character",
+                ".data\ne: .byte 0xc3\n.text\nmain:\n  li a0, 1\n  la a1, e\n  li a2, 1\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
+        simulator.load(Arrays.asList(dangling.toString()), Collections.emptyList(), "");
+        requireOutput(simulator.runUntilStop(1000), "\ufffd", 1, "", 0, false, "incomplete character at exit");
+    }
+
+    private static Path program(String name, String source) throws Exception {
+        Path file = Files.createTempFile(name, ".asm");
+        file.toFile().deleteOnExit();
+        Files.write(file, source.getBytes(StandardCharsets.UTF_8));
+        return file;
+    }
+
+    private static void requireOutput(Map<String, Object> state, String stdout, long stdoutBytes, String stderr, long stderrBytes,
+            boolean truncated, String name) {
+        require(stdout.equals(state.get("stdout")), name + ": stdout " + state.get("stdout"));
+        require(stderr.equals(state.get("stderr")), name + ": stderr " + state.get("stderr"));
+        require(Long.valueOf(stdoutBytes).equals(state.get("stdoutBytes")), name + ": stdoutBytes " + state.get("stdoutBytes"));
+        require(Long.valueOf(stderrBytes).equals(state.get("stderrBytes")), name + ": stderrBytes " + state.get("stderrBytes"));
+        require(Boolean.valueOf(truncated).equals(state.get("truncated")), name + ": truncated " + state.get("truncated"));
+    }
+
     // modify refuses a store exactly when RARS would, with RARS's message, so the check can run before any write.
     // 8 bytes also need a word boundary, as RARS needs to read them back.
     private static void storeChecks() throws Exception {
-        RarsSimulator simulator = new RarsSimulator();
+        RarsSimulator simulator = new RarsSimulator(OUTPUT_LIMIT);
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         int[] addresses = { 0x10010000, 0x10010001, 0x10010002, 0x10010003, 0x10000000, 0x0ffffffc, 0x0ffffff8, 0x00400000, 0x00400002,
                 0x003ffffc, 0x103ffffc, 0x10400000, 0x7ffffffc, 0x7ffffff8, 0x7ffffffe, 0x7fbffffc, 0x7fc00000, 0x80000000, 0xffff0000,
@@ -260,7 +320,7 @@ public final class RarsSimulatorSelfTest {
                 "jal ra, 16", "slli t0, t0, 12", "li t1, 0xFEED2050", "addi t0, t0", "bne t0, t1, -8", "srai t0, t0, 3",
                 "fmadd.s f1, f2, f3, f4", "loop: addi t0, t0, 1", "bnez t0, loop", "beq x1, x2, 8192", "beq x1, x2, 3",
                 "done:", ".data", "ecall");
-        List<Map<String, Object>> encoded = new RarsSimulator().encode(sources);
+        List<Map<String, Object>> encoded = new RarsSimulator(OUTPUT_LIMIT).encode(sources);
         require(encoded.size() == sources.size(), "one result per instruction");
         for (int index = 0; index < sources.size(); index++) require(sources.get(index).equals(encoded.get(index).get("source")), "source " + index);
 
@@ -292,12 +352,12 @@ public final class RarsSimulatorSelfTest {
         requireWord(encoded.get(19), 0, "0x00000073", "I", "opcode", 0x73, "rd", 0, "funct3", 0, "rs1", 0, "imm", 0);
 
         // A backward jump from the first instruction targets an address below the text segment.
-        requireWord(new RarsSimulator().encode(Arrays.asList("jal x0, -2048")).get(0), 0, "0x801ff06f", "J", "opcode", 0x6f, "rd", 0, "imm", -2048);
-        requireError(new RarsSimulator().encode(Arrays.asList("nope x1")).get(0), "\"nope\" is not a recognized operator");
+        requireWord(new RarsSimulator(OUTPUT_LIMIT).encode(Arrays.asList("jal x0, -2048")).get(0), 0, "0x801ff06f", "J", "opcode", 0x6f, "rd", 0, "imm", -2048);
+        requireError(new RarsSimulator(OUTPUT_LIMIT).encode(Arrays.asList("nope x1")).get(0), "\"nope\" is not a recognized operator");
 
         // The CSR number is unsigned, so cycle is 0xc00 where addi reads the same bits as -1024. The csr*i
         // forms keep a 5-bit unsigned immediate where rs1 would be.
-        List<Map<String, Object>> csr = new RarsSimulator().encode(Arrays.asList(
+        List<Map<String, Object>> csr = new RarsSimulator(OUTPUT_LIMIT).encode(Arrays.asList(
                 "rdcycle t0", "rdinstreth a0", "csrw t1, fcsr", "csrrc t1, 0x800, t2", "csrrwi t0, 0x300, 5", "csrsi uie, 8",
                 "csrrci t0, 0xfff, 31", "addi t0, t0, -1024", "wfi"));
         requireWord(csr.get(0), 0, "0xc00022f3", "I", "opcode", 0x73, "rd", 5, "funct3", 2, "rs1", 0, "csr", 0xc00);
@@ -311,9 +371,9 @@ public final class RarsSimulatorSelfTest {
         requireWord(csr.get(8), 0, "0x10500073", "I", "opcode", 0x73, "rd", 0, "funct3", 0, "rs1", 0, "imm", 0x105);
 
         String countMessage = "Between 1 and 200 instructions are needed";
-        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.emptyList()), countMessage, "no instructions");
-        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.nCopies(201, "nop")), countMessage, "too many instructions");
-        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Arrays.asList("nop", "nop\nnop")),
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator(OUTPUT_LIMIT).encode(Collections.emptyList()), countMessage, "no instructions");
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator(OUTPUT_LIMIT).encode(Collections.nCopies(201, "nop")), countMessage, "too many instructions");
+        requireThrows(IllegalArgumentException.class, () -> new RarsSimulator(OUTPUT_LIMIT).encode(Arrays.asList("nop", "nop\nnop")),
                 "Instruction 2 spans more than one line", "instruction with a line break");
 
         // Every word RARS can assemble has an opcode the decoder knows.

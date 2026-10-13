@@ -20,7 +20,7 @@ export function createEncodeHandler(deps: ToolDependencies) {
     if (!deps.bridgeJar || !deps.bridgeToken) throw new Error('rars_encode needs the RARS bridge, which is not configured');
     const instructions = await HeadlessSession.encode({
       javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
-      token: deps.bridgeToken, timeoutMs: deps.timeoutMs,
+      token: deps.bridgeToken, timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes,
     }, input.instructions);
     const failures = instructions.flatMap((entry) => 'error' in entry ? [`${entry.source}: ${entry.error}`] : []);
     const encoded = instructions.length - failures.length;

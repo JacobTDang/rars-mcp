@@ -14,6 +14,8 @@ interface BridgeOptions {
   token: string;
   bridgeToken?: string;
   timeoutMs: number;
+  // The most program output, stdout and stderr together, the bridge keeps from one run.
+  maxOutputBytes: number;
 }
 
 interface HeadlessOptions extends BridgeOptions {
@@ -77,6 +79,7 @@ export class HeadlessSession implements SessionBackend {
     const child = spawnBridge(options.javaExecutable, [
       '-cp', `${options.bridgeJar}${delimiter}${options.rarsJar}`,
       'dev.rarsmcp.server.BridgeServer', '--token', serverToken, '--port', '0',
+      '--max-output-bytes', String(options.maxOutputBytes),
     ]);
     const startup = watchStartup(child, options.timeoutMs);
     let socket: Socket | undefined;
