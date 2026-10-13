@@ -204,7 +204,7 @@ public final class RarsSimulator {
 
     // A breakpoint location: an address, file:line, or a code label.
     private int resolveLocation(String location) throws Exception {
-        if (NUMBER.matcher(location).matches()) return (int) (long) Long.decode(location);
+        if (NUMBER.matcher(location).matches()) return Words.parseAddress(location);
         Matcher fileLine = FILE_LINE.matcher(location);
         if (fileLine.matches()) return addressOfLine(fileLine.group(1), Integer.parseInt(fileLine.group(2)), location);
         return addressOfLabel(location);
