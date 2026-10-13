@@ -7,3 +7,4 @@ javac --release 11 -cp .cache/rars1_6.jar -d "$out" \
   $(find java/bridge/src/main/java java/bridge/src/test/java -name '*.java' -print)
 java -ea -cp "$out:.cache/rars1_6.jar" dev.rarsmcp.protocol.ProtocolSelfTest
 java -ea -cp "$out:.cache/rars1_6.jar" dev.rarsmcp.sim.RarsSimulatorSelfTest
+java -ea -cp "$out:.cache/rars1_6.jar" dev.rarsmcp.server.BridgeServerSelfTest

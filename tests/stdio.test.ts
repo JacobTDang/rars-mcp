@@ -76,6 +76,9 @@ describe('stdio server', () => {
       const { sessionId } = started.structuredContent as { sessionId: string };
       const timedOut = await call('rars_debug_command', { sessionId, action: 'continue', maxSteps: 2_147_483_647 });
       expect(timedOut).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('timed out') }] });
+      const inspected = await call('rars_inspect', { sessionId });
+      expect(inspected.isError).toBeFalsy();
+      expect(inspected.structuredContent).toMatchObject({ status: 'paused', stopReason: 'paused' });
       expect((await call('rars_session_close', { sessionId })).isError).toBeFalsy();
 
       const status = await call('rars_status', {});

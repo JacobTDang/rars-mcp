@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -205,4 +206,48 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     expect(await command({ action: 'continue', maxSteps: 4 })).toMatchObject({ stdout: line, stdoutBytes: 17, truncated: false });
     await handlers.sessionClose({ sessionId });
   });
+
+  it('pauses a running continue', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    execFileSync('cp', ['tests/fixtures/infinite.asm', join(root, 'infinite.asm')]);
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+    const started = await handlers.debugStart({ files: ['infinite.asm'] });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+
+    const running = handlers.debugCommand({ sessionId, action: 'continue', maxSteps: 2_147_483_647 });
+    await new Promise((done) => setTimeout(done, 300));
+    await handlers.debugCommand({ sessionId, action: 'pause' });
+
+    expect((await running).structuredContent).toMatchObject({ status: 'paused', stopReason: 'paused' });
+    await handlers.sessionClose({ sessionId });
+  }, 15_000);
+
+  it('removes a session whose bridge is killed and says how it exited', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    execFileSync('cp', ['tests/fixtures/debug.asm', join(root, 'debug.asm')]);
+    // Its own token, so this test can find its bridge among the others.
+    const bridgeToken = `kill-test-${randomUUID()}`;
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 60_000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken,
+    });
+    const started = await handlers.debugStart({ files: ['debug.asm'] });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+
+    execFileSync('pkill', ['-KILL', '-f', bridgeToken]);
+
+    await vi.waitFor(async () => expect((await handlers.sessionList()).structuredContent).toEqual({ sessions: [] }), { timeout: 5_000 });
+    const before = Date.now();
+    await expect(handlers.debugCommand({ sessionId, action: 'step' })).rejects.toMatchObject({
+      code: 'SESSION_FAILED', message: `Session ${sessionId} failed: RARS bridge exited on signal SIGKILL`,
+    });
+    expect(Date.now() - before).toBeLessThan(100);
+  }, 15_000);
 });

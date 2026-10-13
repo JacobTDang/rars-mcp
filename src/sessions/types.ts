@@ -21,7 +21,7 @@ export type MemoryValue =
   | { address: string; width: 1 | 2 | 4; hex: string; signed: number }
   | { address: string; width: 8; hex: string; signed: string };
 
-export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'exited' | 'ran_off_end' | 'exception' | 'backstep' | 'terminated';
+export type StopReason = 'step' | 'breakpoint' | 'step_limit' | 'paused' | 'exited' | 'ran_off_end' | 'exception' | 'backstep' | 'terminated';
 
 export interface MachineState {
   status: SessionState;

@@ -52,7 +52,8 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Start an isolated stateful RARS debugger session for workspace files.', inputSchema: debugStartSchema,
   }, handlers.debugStart);
   server.registerTool('rars_debug_command', {
-    description: 'Step, backstep, continue, pause, reset, terminate, or manage breakpoints.', inputSchema: debugCommandSchema,
+    description: 'Step, backstep, continue, pause, reset, terminate, or manage breakpoints. A pause stops a continue that is still running.',
+    inputSchema: debugCommandSchema,
   }, handlers.debugCommand);
   server.registerTool('rars_inspect', {
     description: 'Inspect registers, bounded memory, state, and the program output written since the previous reply in a RARS session.',

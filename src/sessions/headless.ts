@@ -2,7 +2,8 @@ import type { ChildProcess } from 'node:child_process';
 import { delimiter } from 'node:path';
 import { createConnection, type Socket } from 'node:net';
 
-import { spawnBridge, stopBridge, watchStartup } from './bridge-process.js';
+import { RarsError } from '../errors.js';
+import { describeExit, spawnBridge, stopBridge, watchStartup } from './bridge-process.js';
 import { BridgeConnection } from './connection.js';
 import type { DebugCommand, EncodedInstruction, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
@@ -23,13 +24,19 @@ interface HeadlessOptions extends BridgeOptions {
   stdin?: string;
 }
 
+// A bridge that dies closes its connection and exits at about the same moment. The exit says
+// more, so when the connection closes first, the session waits this long for the exit.
+const exitGraceMs = 1_000;
+
 export class HeadlessSession implements SessionBackend {
   private readonly connection: BridgeConnection;
   private state: SessionState = 'ready';
   private closed = false;
 
   private constructor(private readonly child: ChildProcess, socket: Socket, timeoutMs: number) {
-    this.connection = new BridgeConnection(socket, { name: 'RARS bridge', timeoutMs });
+    this.connection = new BridgeConnection(socket, {
+      name: 'RARS bridge', timeoutMs, onDisconnect: (failure) => this.disconnected(failure),
+    });
     // A failed session has no further use for its bridge.
     this.connection.onFailure(() => {
       stopBridge(child).catch((error: unknown) => console.error('Failed to stop the RARS bridge of a failed session:', error));
@@ -83,6 +90,7 @@ export class HeadlessSession implements SessionBackend {
       session = new HeadlessSession(child, connection, options.timeoutMs);
       await startup.within(session.request('hello', { token: options.token }));
       startup.finish();
+      session.watchExit();
       return session;
     } catch (error) {
       // The startup error is the one to report, so the session is closed before its connection breaks.
@@ -136,6 +144,21 @@ export class HeadlessSession implements SessionBackend {
 
   private request(command: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.connection.request(command, payload);
+  }
+
+  // Until the bridge has started, the startup reports its exit, with what it printed.
+  private watchExit(): void {
+    const exited = () => this.connection.fail(new RarsError(
+      'BRIDGE_EXITED', `RARS bridge exited ${describeExit(this.child.exitCode, this.child.signalCode)}`,
+      { exitCode: this.child.exitCode, signal: this.child.signalCode },
+    ));
+    if (this.child.exitCode !== null || this.child.signalCode !== null) exited();
+    else this.child.once('exit', exited);
+  }
+
+  private disconnected(failure: RarsError): void {
+    const timer = setTimeout(() => this.connection.fail(failure), exitGraceMs);
+    this.child.once('exit', () => clearTimeout(timer));
   }
 
   private updateState(result: Record<string, unknown>): void {

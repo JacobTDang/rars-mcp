@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -119,9 +120,15 @@ public final class RarsSimulator {
         return snapshot();
     }
 
-    public synchronized Map<String, Object> runUntilStop(int maximumSteps) throws Exception {
+    // pauseRequested is asked before each instruction, and a yes stops the run with stopReason "paused".
+    public synchronized Map<String, Object> runUntilStop(int maximumSteps, BooleanSupplier pauseRequested) throws Exception {
         ensureRunnable();
         for (int count = 0; count < maximumSteps; count++) {
+            if (pauseRequested.getAsBoolean()) {
+                status = "paused";
+                stopReason = "paused";
+                return snapshot();
+            }
             if (!simulateOne()) return snapshot();
             if (breakpoints.contains(RegisterFile.getProgramCounter())) {
                 status = "paused";
