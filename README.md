@@ -89,7 +89,8 @@ workspace-relative `file` to write the image there as before:
 `segment` is `.text`, `.data`, a range like `0x400000-0x10000000`, or an exact-length object such
 as `{ "address": "0x10010000", "words": 180 }`. `{ "label": "results", "words": 180 }` resolves
 the start through the headless bridge's symbol table, so label dumps require the bridge to be
-configured. `words` is at most 65536. `format` is one of `SegmentWindow`, `HexText`, `AsciiText`,
+configured. Range bounds, `address`, and a label's address must be multiples of 4, since RARS
+refuses an unaligned dump. `words` is at most 65536. `format` is one of `SegmentWindow`, `HexText`, `AsciiText`,
 `HEX`, `Binary`, `BinaryText`. With `rars_assemble` the image is produced without running the
 program. For file-backed dumps, the target folder must already exist.
 

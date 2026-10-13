@@ -10,7 +10,7 @@ import { HeadlessSession } from '../sessions/headless.js';
 import { LiveClient } from '../live/client.js';
 import { discoverLiveSession } from '../live/discovery.js';
 import { addressRange, prepareDumps, type ResolvedDump } from './dumps.js';
-import { dumpSchema, isBreakpointAction, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type DumpInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
+import { dumpSchema, isBreakpointAction, isWordAligned, type AssembleInput, type CloseSessionInput, type DebugCommandInput, type DebugStartInput, type DumpInput, type InspectInput, type LiveCommandInput, type ModifyInput, type RunInput } from './schemas.js';
 import { prepareSource, withPreparedSource } from './source.js';
 
 export interface ToolDependencies {
@@ -76,6 +76,7 @@ async function resolveDumps(
     if ('address' in segment) return { input: dump, segment: addressRange(segment.address, segment.words) };
     const address = symbols.find((symbol) => symbol.name === segment.label)?.address;
     if (address === undefined) throw new Error(`Unknown dump label: ${segment.label}`);
+    if (!isWordAligned(address)) throw new Error(`dump label ${segment.label} at ${address} is not word aligned`);
     return { input: dump, segment: addressRange(address, segment.words) };
   });
 }
@@ -94,8 +95,9 @@ export function createToolHandlers(deps: ToolDependencies) {
       );
       let result: CliResult;
       let dumpOutput: Array<Record<string, unknown>>;
+      let unwrittenDumps: string[];
       try {
-        result = await deps.run({
+        const ran = await deps.run({
           javaExecutable: deps.javaExecutable,
           rarsJar: deps.rarsJar,
           cwd: source?.directory ?? deps.workspace.root,
@@ -113,9 +115,13 @@ export function createToolHandlers(deps: ToolDependencies) {
           timeoutMs: runInput.timeoutMs ?? deps.timeoutMs,
           maxOutputBytes: deps.maxOutputBytes,
         });
+        // RARS names the file of a dump it could not write, and a temporary path means nothing to the caller.
+        result = { ...ran, stderr: preparedDumps.remapText(ran.stderr) };
         const failed = result.exitCode !== 0 || result.timedOut || result.truncated ||
           parseDiagnostics(result.stderr).some((diagnostic) => diagnostic.severity === 'error');
-        dumpOutput = await preparedDumps.read(!failed);
+        // RARS still exits 0 when it cannot write a dump; its reason is on stderr.
+        unwrittenDumps = failed ? [] : await preparedDumps.unwritten();
+        dumpOutput = await preparedDumps.read(!failed && unwrittenDumps.length === 0);
       } finally {
         await preparedDumps.cleanup();
       }
@@ -130,12 +136,16 @@ export function createToolHandlers(deps: ToolDependencies) {
         ...(diagnostic.file === undefined || source === undefined ? {} : { file: source.remapFile(diagnostic.file) }),
       }));
       const isError = result.exitCode !== 0 || result.timedOut || result.truncated ||
-        diagnostics.some((item) => item.severity === 'error');
+        diagnostics.some((item) => item.severity === 'error') || unwrittenDumps.length > 0;
       const action = mode === 'assemble' ? 'Assembly' : 'Execution';
       const summary = result.timedOut ? `${action} timed out` :
         result.truncated ? `${action} output exceeded its limit` :
         isError ? `${action} failed` : `${action} completed`;
-      const text = isError ? [summary, ...formatErrorDetails(output.stderr, diagnostics)].join('\n') : summary;
+      const details = [
+        ...formatErrorDetails(output.stderr, diagnostics),
+        ...unwrittenDumps.map((dump) => `RARS wrote no file for ${dump}`),
+      ];
+      const text = isError ? [summary, ...details].join('\n') : summary;
       return {
         content: [{ type: 'text', text }],
         structuredContent: { ...result, ...output, diagnostics, ...(dumpOutput.length ? { dumps: dumpOutput } : {}) },

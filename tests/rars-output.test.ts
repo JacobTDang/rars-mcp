@@ -5,6 +5,9 @@ import { extractDumps, extractInstructionCount } from '../src/rars/output.js';
 // Captured from RARS 1.6 runs with the ic option.
 const stepLimit = '\nProgram terminated when maximum step limit 50 reached.\n\n50\nt0\t0x00000000\n';
 const assemblyFailure = 'Error in /w/invalid.asm line 3 column 3: "x" is not a recognized operator\n\nProcessing terminated due to errors.\n';
+// RARS prints a dump it could not write after the count and the register dump.
+const unwrittenDump = '\nProgram terminated by calling exit\n\n1\nt0\t0x00000000\n'
+  + 'This segment has not been written to, there is nothing to dump.\n';
 
 describe('extractInstructionCount', () => {
   it('reads the count above the register dump and removes it from stderr', () => {
@@ -16,6 +19,14 @@ describe('extractInstructionCount', () => {
 
   it('returns no count when assembly failed and the program never ran', () => {
     expect(extractInstructionCount(assemblyFailure)).toEqual({ stderr: assemblyFailure });
+  });
+
+  it('reads the count above the message for a dump RARS could not write', () => {
+    expect(extractInstructionCount(unwrittenDump)).toEqual({
+      instructionCount: 1,
+      stderr: '\nProgram terminated by calling exit\n\nt0\t0x00000000\n'
+        + 'This segment has not been written to, there is nothing to dump.\n',
+    });
   });
 
   it('fails when a program ran but RARS printed no count', () => {
@@ -44,6 +55,17 @@ describe('extractDumps', () => {
         { address: '0x10010010', hex: '0x00000000', signed: 0 },
       ],
       stderr: '\nProgram terminated by calling exit\n\n5\n',
+    });
+  });
+
+  it('parses the registers above the messages for dumps RARS could not write', () => {
+    const stderr = `${unwrittenDump}Error while attempting to save dump, segment/address-range 0x10010008-0x10010000 is invalid!\n`;
+
+    expect(extractDumps(stderr)).toEqual({
+      registers: { t0: { hex: '0x00000000', signed: 0 } },
+      memory: [],
+      stderr: '\nProgram terminated by calling exit\n\n1\nThis segment has not been written to, there is nothing to dump.\n'
+        + 'Error while attempting to save dump, segment/address-range 0x10010008-0x10010000 is invalid!\n',
     });
   });
 });

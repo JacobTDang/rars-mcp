@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,10 @@ export interface ResolvedDump {
 
 export interface PreparedDumps {
   cli: Array<{ segment: string; format: string; file: string }>;
+  // Each dump RARS wrote no file for, as dump[index] (segment).
+  unwritten(): Promise<string[]>;
+  // Replaces each temporary dump path with dump[index], the dump's place in the request.
+  remapText(text: string): string;
   read(inlineContents?: boolean): Promise<Array<Record<string, unknown>>>;
   cleanup(): Promise<void>;
 }
@@ -29,10 +33,22 @@ export async function prepareDumps(
   const cli = dumps.map(({ input, segment }, index) => ({
     segment,
     format: input.format,
-    file: workspaceFiles[index] ?? join(directory!, `dump-${index}`),
+    // The .out ending keeps the path of dump-1 from matching inside dump-10 in remapText.
+    file: workspaceFiles[index] ?? join(directory!, `dump-${index}.out`),
   }));
   return {
     cli,
+    unwritten: async () => {
+      const written = await Promise.all(cli.map(({ file }) => access(file).then(() => true, (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      })));
+      return cli.flatMap(({ segment }, index) => written[index] ? [] : [`dump[${index}] (${segment})`]);
+    },
+    remapText: (text) => cli.reduce(
+      (mapped, { file }, index) => workspaceFiles[index] === undefined ? mapped.replaceAll(file, `dump[${index}]`) : mapped,
+      text,
+    ),
     read: async (inlineContents = true) => Promise.all(dumps.map(async ({ input }, index) => {
       const file = workspaceFiles[index];
       if (file !== undefined) return { segment: input.segment, format: input.format, file };

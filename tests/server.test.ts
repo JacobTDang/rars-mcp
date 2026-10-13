@@ -62,6 +62,19 @@ describe('MCP server', () => {
     });
   });
 
+  it('rejects an unaligned dump address in rars_run', async () => {
+    const connection = await connect();
+    close = connection.close;
+
+    const result = await connection.client.callTool({
+      name: 'rars_run',
+      arguments: { files: ['prog.s'], dump: [{ segment: { address: '0x10010001', words: 2 }, format: 'HexText' }] },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('dump address 0x10010001 is not word aligned');
+    expect(JSON.stringify(result.content)).not.toContain('ENOENT');
+  });
+
   it('rejects an address on a debug action that does not use one', async () => {
     const connection = await connect();
     close = connection.close;
