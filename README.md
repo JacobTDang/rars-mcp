@@ -67,6 +67,9 @@ outside them is refused. Folders come from, in order:
     "memory": [{ "address": "0x10010000", "hex": "0x6c6c6568", "signed": 1819043176 }],
     "instructionCount": 22 }
   ```
+
+  `instructionCount` is RARS's `ic` count, which excludes the final exit `ecall`: `li t0, 3`,
+  `li a7, 10`, `ecall` reports `2`.
 - **`rars_eval`** — expected results for up to 1024 RV32I/M ALU cases, such as
   `{ "op": "slt", "rs1": "0xFFFFFFFB", "rs2": "0x7FFFFFFF" }`, with `imm` in place of `rs2` for
   `addi`, `slti`, `sltiu`, `xori`, `ori`, `andi`, `slli`, `srli`, `srai`. The cases run in one generated

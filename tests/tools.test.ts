@@ -71,6 +71,20 @@ describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
     expect(result.structuredContent).toMatchObject({ instructionCount: 5 });
     expect((result.structuredContent as { stderr: string }).stderr).not.toMatch(/^5$/m);
   });
+
+  it('names the time limit when a run times out', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'loop.s'), '.text\nmain:\n  j main\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({ files: ['loop.s'], timeoutMs: 1500 });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { timedOut: true } });
+    expect(result.content[0]).toMatchObject({ text: expect.stringMatching(/^Execution timed out after 1500 ms/) });
+  });
 });
 
 describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
@@ -481,7 +495,24 @@ describe('headless tool handlers', () => {
 
     const result = await handlers.run({ files: ['loop.asm'], programArgs: ['one'] });
     expect(result).toMatchObject({ isError: true, structuredContent: { timedOut: true } });
-    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('timed out') });
+    expect(result.content).toEqual([{ type: 'text', text: 'Execution timed out after 1000 ms' }]);
+  });
+
+  it('names the timeoutMs given in the input when a run times out', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'loop.asm'), 'loop');
+    const run = vi.fn(async () => ({
+      exitCode: null, signal: 'SIGKILL' as const, stdout: '', stderr: '', timedOut: true, truncated: false,
+    }));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run,
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    const result = await handlers.run({ files: ['loop.asm'], timeoutMs: 1500 });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 1500 }));
+    expect(result.content).toEqual([{ type: 'text', text: 'Execution timed out after 1500 ms' }]);
   });
 
   it('rejects an unaligned dump address before running RARS', async () => {
