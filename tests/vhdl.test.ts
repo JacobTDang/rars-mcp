@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readdir, realpath } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 
@@ -16,6 +16,20 @@ import { parseNvcOutput } from '../src/vhdl/nvc-output.js';
 import { Workspace } from '../src/workspace.js';
 
 const simulator = process.env.VHDL_SIMULATOR ?? 'nvc';
+
+// The leftover checks list the temporary folder for nvc work folders. The system one is shared with
+// every other process on the machine, so a private one keeps other runs out of the count.
+const systemTmpdir = process.env.TMPDIR;
+let privateTmpdir: string;
+beforeAll(async () => {
+  privateTmpdir = await mkdtemp(join(tmpdir(), 'vhdl-tools-tmp-'));
+  process.env.TMPDIR = privateTmpdir;
+});
+afterAll(async () => {
+  if (systemTmpdir === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = systemTmpdir;
+  await rm(privateTmpdir, { recursive: true, force: true });
+});
 const fixtures = resolve('tests/fixtures/vhdl');
 const waveFixtures = resolve('tests/fixtures/wave');
 
