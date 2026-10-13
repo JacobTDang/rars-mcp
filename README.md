@@ -168,6 +168,7 @@ that keeps the run's results, names the dump and quotes RARS's reason.
 - **`rars_inspect`** — registers (including `pc`) and bounded memory as `{ hex, signed }`, plus
   `includeSymbols` for the symbol table and `instructions` for a window of the assembled program
   with each instruction's address, machine code, basic form, source line and file.
+  - A memory `address` is a `0x` hex or decimal string; a decimal has no leading zero.
   - `signed` is a number, except for memory read with `length: 8`, where it is a decimal string
     such as `"-9223372036854775808"`: a JSON number cannot hold every 64-bit value exactly.
   - `instructions: { around, count }` returns `count` instructions (10 by default, at most 200)
@@ -180,11 +181,12 @@ that keeps the run's results, names the dump and quotes RARS's reason.
     `pc`, so `instructions: {}` shows the program's last 10.
   - `includeInstructions: true` still returns the whole program, but is deprecated.
 - **`rars_modify`** — write registers or memory. Values are decimal or `0x` hex strings, signed or
-  unsigned, and must fit the register or the `width`; a `width: 8` value is exact across all 64
-  bits, from `"-9223372036854775808"` to `"0xffffffffffffffff"`. Every register name, address,
-  alignment and value is checked before anything is written, so a rejected request changes
-  nothing. An 8-byte write must start on a word boundary, as an 8-byte read must. `x0` (`zero`)
-  is hard-wired to zero, so a write to it is refused.
+  unsigned, and must fit the register or the `width`. A memory `address` and `value` are `0x` hex
+  or decimal with no leading zero, and only a `value` may be negative. A `width: 8` value is exact
+  across all 64 bits, from `"-9223372036854775808"` to `"0xffffffffffffffff"`. Every register
+  name, address, alignment and value is checked before anything is written, so a rejected request
+  changes nothing. An 8-byte write must start on a word boundary, as an 8-byte read must. `x0`
+  (`zero`) is hard-wired to zero, so a write to it is refused.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.
 

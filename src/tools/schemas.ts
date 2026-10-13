@@ -150,8 +150,13 @@ const instructionWindowSchema = z.strictObject({
   }
 });
 const byteWidthSchema = z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]);
-const memoryReadSchema = z.strictObject({ address: z.string(), length: byteWidthSchema });
-const memoryWriteSchema = z.strictObject({ address: z.string(), value: z.string(), width: byteWidthSchema });
+// 0x hex or decimal. The bridge reads a decimal number with a leading 0 as octal, so it has none.
+const numberSchema = (field: string, pattern: RegExp) => z.string()
+  .regex(pattern, { error: (issue) => `${field} must be a hex or decimal number: ${JSON.stringify(issue.input)}` });
+const addressSchema = numberSchema('address', /^(?:0[xX][0-9a-fA-F]+|0|[1-9][0-9]*)$/);
+const valueSchema = numberSchema('value', /^(?:0[xX][0-9a-fA-F]+|-?(?:0|[1-9][0-9]*))$/);
+const memoryReadSchema = z.strictObject({ address: addressSchema, length: byteWidthSchema });
+const memoryWriteSchema = z.strictObject({ address: addressSchema, value: valueSchema, width: byteWidthSchema });
 export const inspectSchema = z.strictObject({
   sessionId: z.string().uuid(),
   registers: z.array(z.string()).optional(),
