@@ -50,14 +50,30 @@ async function binaryFormat(file: string): Promise<'FST' | 'GHW' | 'gzip' | unde
   }
 }
 
-// One row per time and one column per signal: hex for vectors, bits for scalars and unknown values.
-function table({ signals, values }: WaveQueryResult): string {
+// One row per time and one column per signal: hex for vectors, bits for scalars and unknown values. A time
+// outside the dump is noted at the end of its row.
+function table(result: WaveQueryResult): string {
+  const { startTime, endTime, signals, values } = result;
+  const notes = { before: `(before start ${startTime})`, after: `(after end ${endTime})` };
   const rows = [
-    ['time', ...signals.map((signal) => signal.name)],
-    ...values.map((row) => [row.time as string, ...signals.map((signal) => cell(signal, row[signal.name] as WaveValue))]),
+    ['time', ...signals.map((signal) => signal.name), ''],
+    ...values.map((row) => [
+      row.time,
+      ...signals.map((signal) => cell(signal, row[signal.name] as WaveValue)),
+      row.beyond === undefined ? '' : notes[row.beyond],
+    ]),
   ];
   const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)));
-  return rows.map((row) => row.map((text, column) => text.padEnd(widths[column]!)).join('  ').trimEnd()).join('\n');
+  const lines = rows.map((row) => row.map((text, column) => text.padEnd(widths[column]!)).join('  ').trimEnd());
+  return [...outside(result), ...lines].join('\n');
+}
+
+// A first line when no requested time is inside the dump, since then no value in the table was recorded.
+function outside({ startTime, endTime, values }: WaveQueryResult): string[] {
+  if (values.some((row) => row.beyond === undefined)) return [];
+  if (values.every((row) => row.beyond === 'after')) return [`The dump ends at ${endTime}, before every requested time.`];
+  if (values.every((row) => row.beyond === 'before')) return [`The dump starts at ${startTime}, after every requested time.`];
+  return [`The dump runs from ${startTime} to ${endTime}, and every requested time is outside it.`];
 }
 
 function cell(signal: WaveSignal, value: WaveValue): string {

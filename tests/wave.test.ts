@@ -15,10 +15,35 @@ const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'wave
 const signals = ['tb_alu.s_a', 'tb_alu/dut/s_sum', 'TB_ALU.S_OVFL', 'tb_alu.s_ratio', 'tb_alu.s_step', 'tb_alu.s_phase'];
 const times = ['0 ns', '10ns', '20 ns', '35 ns'];
 
+// Its first timestamp is #5 and its last #20, in 1 ns units.
+const shortDump = `$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! done $end
+$var wire 4 " count $end
+$upscope $end
+$enddefinitions $end
+#5
+$dumpvars
+0!
+b0 "
+$end
+#10
+b101 "
+#20
+1!
+b1010 "
+`;
+
 async function workspaceWith(...files: string[]): Promise<Workspace> {
   const root = await mkdtemp(join(tmpdir(), 'rars-wave-'));
   await Promise.all(files.map((file) => copyFile(join(fixtures, file), join(root, file))));
   return Workspace.create(root);
+}
+
+async function shortDumpQuery() {
+  const workspace = await workspaceWith();
+  await writeFile(join(workspace.root, 'short.vcd'), shortDump);
+  return createWaveQuery({ workspace, waveMaxBytes: 1024 * 1024 });
 }
 
 describe('wave_query', () => {
@@ -30,6 +55,8 @@ describe('wave_query', () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toEqual({
       timescale: '1 fs',
+      startTime: '0 fs',
+      endTime: '40 ns',
       signals: [
         { name: 'tb_alu.s_a', width: 4, type: 'logic' },
         { name: 'tb_alu.dut.s_sum', width: 4, type: 'logic' },
@@ -97,6 +124,62 @@ describe('wave_query', () => {
     for (const line of lines.slice(1)) {
       for (const column of columns.slice(1)) expect(`${line[column - 1]}${line[column]}`, line).toMatch(/^ \S$/);
     }
+  });
+
+  it('marks a time before the first timestamp or after the last one at the end of its row', async () => {
+    const query = await shortDumpQuery();
+
+    const result = await query({
+      file: 'short.vcd', signals: ['top.done', 'top.count'], times: ['2 ns', '5 ns', '20 ns', '500 ns'],
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      startTime: '5 ns',
+      endTime: '20 ns',
+      values: [
+        { time: '2 ns', beyond: 'before', 'top.done': { bits: 'x' } },
+        { time: '5 ns', 'top.done': { bits: '0' } },
+        { time: '20 ns', 'top.done': { bits: '1' } },
+        { time: '500 ns', beyond: 'after', 'top.done': { bits: '1' } },
+      ],
+    });
+    const values = (result.structuredContent as { values: Array<Record<string, unknown>> }).values;
+    expect(values.map((row) => 'beyond' in row)).toEqual([true, false, false, true]);
+    expect((result.content[0] as { text: string }).text.split('\n').map((line) => line.split(/ {2,}/))).toEqual([
+      ['time', 'top.done', 'top.count'],
+      ['2 ns', 'x', 'xxxx', '(before start 5 ns)'],
+      ['5 ns', '0', '0x0'],
+      ['20 ns', '1', '0xa'],
+      ['500 ns', '1', '0xa', '(after end 20 ns)'],
+    ]);
+  });
+
+  it('leads with the end of the dump when every time is after it', async () => {
+    const query = await shortDumpQuery();
+
+    const result = await query({ file: 'short.vcd', signals: ['top.done'], times: ['21 ns', '500 ns'] });
+
+    expect(result.isError).toBeFalsy();
+    expect((result.content[0] as { text: string }).text.split('\n')).toEqual([
+      'The dump ends at 20 ns, before every requested time.',
+      'time    top.done',
+      '21 ns   1         (after end 20 ns)',
+      '500 ns  1         (after end 20 ns)',
+    ]);
+  });
+
+  it('leads with the range of the dump when every time is outside it', async () => {
+    const query = await shortDumpQuery();
+    const firstLine = async (times: string[]) => {
+      const result = await query({ file: 'short.vcd', signals: ['top.done'], times });
+      expect(result.isError).toBeFalsy();
+      return (result.content[0] as { text: string }).text.split('\n')[0];
+    };
+
+    expect(await firstLine(['0 ns', '4 ns'])).toBe('The dump starts at 5 ns, after every requested time.');
+    expect(await firstLine(['4 ns', '30 ns'])).toBe('The dump runs from 5 ns to 20 ns, and every requested time is outside it.');
+    expect(await firstLine(['4 ns', '5 ns'])).toBe('time  top.done');
   });
 
   it('refuses a file outside the workspace', async () => {

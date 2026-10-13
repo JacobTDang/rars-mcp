@@ -130,9 +130,11 @@ $end
 `;
     const result = await query(text, ['top.clk', 'top.data', 'top.ratio', 'top.phase'], ['4 ns', '5 ns']);
 
+    expect(result).toMatchObject({ startTime: '5 ns', endTime: '5 ns' });
     expect(result.values).toEqual([
       {
         time: '4 ns',
+        beyond: 'before',
         'top.clk': { bits: 'x', hex: null, unsigned: null, signed: null },
         'top.data': { bits: 'xxxx', hex: null, unsigned: null, signed: null },
         'top.ratio': { real: null },
@@ -146,6 +148,109 @@ $end
         'top.phase': { string: 'idle' },
       },
     ]);
+  });
+
+  it('reports the first and last timestamps and marks a time after the last one', async () => {
+    const text = `$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! done $end
+$var wire 4 " count $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+0!
+b0 "
+$end
+#10
+b101 "
+#20
+1!
+b1010 "
+`;
+    const result = await query(text, ['top.done', 'top.count'], ['5 ns', '20 ns', '500 ns']);
+
+    expect(result).toMatchObject({ startTime: '0 ns', endTime: '20 ns' });
+    expect(result.values).toEqual([
+      {
+        time: '5 ns',
+        'top.done': { bits: '0', hex: '0x0', unsigned: 0, signed: 0 },
+        'top.count': { bits: '0000', hex: '0x0', unsigned: 0, signed: 0 },
+      },
+      {
+        time: '20 ns',
+        'top.done': { bits: '1', hex: '0x1', unsigned: 1, signed: -1 },
+        'top.count': { bits: '1010', hex: '0xa', unsigned: 10, signed: -6 },
+      },
+      {
+        time: '500 ns',
+        beyond: 'after',
+        'top.done': { bits: '1', hex: '0x1', unsigned: 1, signed: -1 },
+        'top.count': { bits: '1010', hex: '0xa', unsigned: 10, signed: -6 },
+      },
+    ]);
+  });
+
+  it('marks a time between the last tick and the next one as after the end', async () => {
+    const coarse = `$timescale 10 ns $end
+$scope module top $end
+$var wire 1 ! v $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+#3
+1!
+`;
+    const result = await query(coarse, ['top.v'], ['30 ns', '0.03 us', '35 ns', '3', '3.5']);
+
+    expect(result.endTime).toBe('30 ns');
+    expect(result.values.map((row) => row.beyond)).toEqual([undefined, undefined, 'after', undefined, 'after']);
+  });
+
+  it('gives the first and last timestamps in the largest unit that keeps them at least 1', async () => {
+    const dump = (timescale: string, times: number[]) => `$timescale ${timescale} $end
+$scope module top $end
+$var wire 1 ! v $end
+$upscope $end
+$enddefinitions $end
+${times.map((time) => `#${time}\n0!`).join('\n')}
+`;
+    const range = async (timescale: string, times: number[]) => {
+      const { startTime, endTime } = await query(dump(timescale, times), ['top.v'], ['0']);
+      return [startTime, endTime];
+    };
+
+    expect(await range('1 fs', [0, 40000000])).toEqual(['0 fs', '40 ns']);
+    expect(await range('1 ps', [999, 1500000])).toEqual(['999 ps', '1.5 us']);
+    expect(await range('100 ps', [15, 123456789])).toEqual(['1.5 ns', '12.3456789 ms']);
+    expect(await range('10 ns', [0, 3])).toEqual(['0 ns', '30 ns']);
+    expect(await range('100 s', [1, 25])).toEqual(['100 s', '2500 s']);
+  });
+
+  it('gives the first and last timestamps as bare numbers when the file has no timescale', async () => {
+    const result = await query(basic.replace('$timescale 1 ns $end\n', ''), ['top.clk'], ['15', '31']);
+
+    expect(result).toMatchObject({ timescale: null, startTime: '0', endTime: '30' });
+    expect(result.values.map((row) => row.beyond)).toEqual([undefined, 'after']);
+  });
+
+  it('reads to the end of the file for the last timestamp after every time is answered', async () => {
+    const result = await query(basic, ['top.clk'], ['0']);
+
+    expect(result).toMatchObject({ startTime: '0 ns', endTime: '30 ns' });
+    await expect(query(`${basic}#40\nq!\n`, ['top.clk'], ['0'])).rejects.toThrow('Cannot read VCD value change "q!" at #40');
+  });
+
+  it('rejects a file with no timestamp after its definitions', async () => {
+    const text = `$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+$upscope $end
+$enddefinitions $end
+`;
+
+    await expect(query(text, ['top.clk'], ['0'])).rejects.toThrow('The VCD file has no timestamp after $enddefinitions');
   });
 
   it('matches nested names with . or / separators, ignoring case', async () => {

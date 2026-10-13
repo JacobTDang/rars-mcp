@@ -17,10 +17,20 @@ export interface WaveQuery {
   times: string[];
 }
 
+export interface WaveRow {
+  time: string;
+  // Set when the time is before the first timestamp or after the last one, so its values were not recorded.
+  beyond?: 'before' | 'after';
+  [signal: string]: string | WaveValue;
+}
+
 export interface WaveQueryResult {
   timescale: string | null;
+  // The first and last timestamps of the dump.
+  startTime: string;
+  endTime: string;
   signals: WaveSignal[];
-  values: Array<Record<string, string | WaveValue>>;
+  values: WaveRow[];
 }
 
 type Kind = 'bits' | 'real' | 'string';
@@ -44,6 +54,7 @@ const TIME = /^(\d+(?:\.\d*)?|\.\d+)\s*(fs|ps|ns|us|ms|s)?$/i;
 const STATES = /^[01xzuwlh-]+$/i;
 const LISTED_NAMES = 20;
 
+// The whole file is read, even after every requested time is answered, to find its last timestamp.
 export async function queryVcd(chunks: AsyncIterable<string> | Iterable<string>, query: WaveQuery): Promise<WaveQueryResult> {
   const definitions = new Definitions();
   let dump: Dump | undefined;
@@ -51,9 +62,8 @@ export async function queryVcd(chunks: AsyncIterable<string> | Iterable<string>,
     for (const token of tokens) {
       if (dump === undefined) {
         if (definitions.read(token)) dump = new Dump(definitions, query);
-      } else if (dump.read(token)) {
-        // Every requested time is behind us, so the rest of the file cannot change the answer.
-        return dump.finish();
+      } else {
+        dump.read(token);
       }
     }
   }
@@ -146,10 +156,11 @@ class Dump {
   private readonly watched = new Map<string, Variable>();
   private readonly current = new Map<string, string | number>();
   // Requested times in ascending order, each answered once the dump moves past it.
-  private readonly pending: Array<{ index: number; ticks: bigint }>;
+  private readonly pending: Array<{ index: number } & Ticks>;
   private readonly rows: Array<Array<string | number | undefined>> = [];
   private readonly timescale: Timescale | undefined;
   private answered = 0;
+  private first: bigint | undefined;
   private time: bigint | undefined;
   private value: string | undefined;
   private skipping = false;
@@ -171,24 +182,24 @@ class Dump {
       this.watched.set(found.id, found);
     }
     this.pending = query.times
-      .map((time, index) => ({ index, ticks: ticks(time, this.timescale) }))
+      .map((time, index) => ({ index, ...ticks(time, this.timescale) }))
       .sort((left, right) => (left.ticks < right.ticks ? -1 : left.ticks > right.ticks ? 1 : 0));
   }
 
-  // True once every requested time has been answered.
-  read(token: string): boolean {
+  read(token: string): void {
     if (this.skipping) {
       this.skipping = token !== '$end';
-      return false;
+      return;
     }
     if (this.value !== undefined) {
       this.change(this.value, token);
       this.value = undefined;
-      return false;
+      return;
     }
     const first = token[0]!;
-    if (first === '#') return this.advance(token);
-    if (first === '$') {
+    if (first === '#') {
+      this.advance(token);
+    } else if (first === '$') {
       // These only bracket value changes; any other section, such as $comment, is skipped.
       this.skipping = !['$dumpvars', '$dumpall', '$dumpon', '$dumpoff', '$end'].includes(token);
     } else if ('bBrRsS'.includes(first)) {
@@ -198,28 +209,37 @@ class Dump {
     } else {
       throw new Error(`Cannot read VCD value change "${clip(token)}" at #${this.time ?? 0}`);
     }
-    return false;
   }
 
   finish(): WaveQueryResult {
+    const { first, time: last } = this;
+    if (first === undefined || last === undefined) throw new Error('The VCD file has no timestamp after $enddefinitions');
     this.answer(undefined);
+    const beyond: Array<'before' | 'after' | undefined> = [];
+    for (const { index, ticks, between } of this.pending) {
+      const after = ticks > last || (ticks === last && between);
+      beyond[index] = ticks < first ? 'before' : after ? 'after' : undefined;
+    }
     return {
       timescale: this.timescale?.label ?? null,
+      startTime: formatTime(first, this.timescale),
+      endTime: formatTime(last, this.timescale),
       signals: this.signals.map(({ name, width, type }) => ({ name, width, type })),
-      values: this.query.times.map((time, index) => Object.fromEntries([
-        ['time', time],
-        ...this.signals.map((signal, column) => [signal.name, waveValue(signal, this.rows[index]![column])]),
-      ])),
+      values: this.query.times.map((time, index) => ({
+        time,
+        ...(beyond[index] === undefined ? {} : { beyond: beyond[index] }),
+        ...Object.fromEntries(this.signals.map((signal, column) => [signal.name, waveValue(signal, this.rows[index]![column])])),
+      })),
     };
   }
 
-  private advance(token: string): boolean {
+  private advance(token: string): void {
     if (!/^#\d+$/.test(token)) throw new Error(`Cannot read VCD time "${clip(token)}"`);
     const time = BigInt(token.slice(1));
     if (this.time !== undefined && time < this.time) throw new Error(`VCD time goes backwards: ${token} after #${this.time}`);
     this.answer(time);
+    this.first ??= time;
     this.time = time;
-    return this.answered === this.pending.length;
   }
 
   // Records the current values for every pending time before `until`, or for all of them.
@@ -268,9 +288,15 @@ function resolve(requested: string, lookup: Map<string, Variable[]>, variables: 
   throw new Error(`Unknown signal ${requested}. No signal is named ${leaf}; signals in the file ${listing(variables)}`);
 }
 
-// A time in whole ticks of the timescale. A change only happens on a whole tick, so a time between
-// two ticks rounds down to the tick before it, which still finds the last change at or before it.
-function ticks(time: string, timescale: Timescale | undefined): bigint {
+interface Ticks {
+  ticks: bigint;
+  between: boolean;
+}
+
+// A time in whole ticks of the timescale, and whether it falls between two ticks. A change only happens on
+// a whole tick, so a time between two ticks rounds down to the tick before it, which still finds the last
+// change at or before it.
+function ticks(time: string, timescale: Timescale | undefined): Ticks {
   const match = TIME.exec(time.trim());
   if (match === null) {
     throw new Error(`Cannot read time "${time}"; use a number with an optional unit (fs, ps, ns, us, ms, s), such as "20 ns"`);
@@ -286,7 +312,23 @@ function ticks(time: string, timescale: Timescale | undefined): bigint {
     exponent += UNIT_EXPONENTS[match[2].toLowerCase()]! - timescale.exponent;
     divisor = timescale.magnitude;
   }
-  return exponent >= 0 ? digits * 10n ** BigInt(exponent) / divisor : digits / (divisor * 10n ** BigInt(-exponent));
+  const numerator = exponent >= 0 ? digits * 10n ** BigInt(exponent) : digits;
+  const denominator = exponent >= 0 ? divisor : divisor * 10n ** BigInt(-exponent);
+  return { ticks: numerator / denominator, between: numerator % denominator !== 0n };
+}
+
+// Ticks as a time in the largest unit that keeps the number at least 1, such as "20 ns" or "1.5 us", or as
+// a bare number of ticks when the file has no timescale. Zero is given in the unit of the timescale.
+function formatTime(count: bigint, timescale: Timescale | undefined): string {
+  if (timescale === undefined) return count.toString();
+  // Counted in femtoseconds, the smallest unit, so every time is a whole number.
+  const femtoseconds = count * timescale.magnitude * 10n ** BigInt(timescale.exponent + 15);
+  const units = Object.entries(UNIT_EXPONENTS).map(([unit, exponent]) => ({ unit, digits: exponent + 15 }));
+  const { unit, digits } = units.find(({ digits }) => femtoseconds >= 10n ** BigInt(digits))
+    ?? units.find(({ digits }) => digits === timescale.exponent + 15)!;
+  const size = 10n ** BigInt(digits);
+  const fraction = (femtoseconds % size).toString().padStart(digits, '0').replace(/0+$/, '');
+  return `${femtoseconds / size}${fraction === '' ? '' : `.${fraction}`} ${unit}`;
 }
 
 // A value shorter than its signal is padded on the left: with 0 after a 0 or 1, otherwise with its first state.
