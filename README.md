@@ -165,7 +165,8 @@ results and quotes RARS's reason.
   unsigned, and must fit the register or the `width`; a `width: 8` value is exact across all 64
   bits, from `"-9223372036854775808"` to `"0xffffffffffffffff"`. Every register name, address,
   alignment and value is checked before anything is written, so a rejected request changes
-  nothing. An 8-byte write must start on a word boundary, as an 8-byte read must.
+  nothing. An 8-byte write must start on a word boundary, as an 8-byte read must. `x0` (`zero`)
+  is hard-wired to zero, so a write to it is refused.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.
 
