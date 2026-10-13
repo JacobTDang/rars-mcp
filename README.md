@@ -147,6 +147,8 @@ results and quotes RARS's reason.
   - Every step and continue reports why it stopped: `step`, `breakpoint`, `step_limit`, `exited`,
     `ran_off_end`, `exception` or `terminated`. A program that has terminated refuses to run
     until the session is reset.
+  - `reset` starts the program again with no backstep history, so `backstep` cannot return to the
+    previous run. With nothing to undo, `backstep` fails with `No backstep history`.
 - **`rars_inspect`** — registers (including `pc`) and bounded memory as `{ hex, signed }`, plus
   `includeSymbols` for the symbol table and `instructions` for a window of the assembled program
   with each instruction's address, machine code, basic form, source line and file.

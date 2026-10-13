@@ -67,6 +67,18 @@ public final class RarsSimulatorSelfTest {
         require("paused".equals(simulator.reset().get("status")), "reset after terminate");
         require("step".equals(simulator.step().get("stopReason")), "step after reset");
 
+        // A reset starts a new run, so the previous run's history cannot be stepped back into.
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        require("exited".equals(simulator.runUntilStop(1000).get("stopReason")), "run to exit before reset");
+        simulator.reset();
+        requireThrows(IllegalStateException.class, () -> simulator.backstep(), "No backstep history", "backstep after reset");
+        Map<String, Object> fresh = simulator.snapshot();
+        require("paused".equals(fresh.get("status")) && pc(fresh) == initialPc && register(simulator, "a0") == 0 && register(simulator, "a7") == 0,
+                "state after reset and a refused backstep");
+        simulator.step();
+        require(pc(simulator.backstep()) == initialPc, "backstep within the new run");
+        requireThrows(IllegalStateException.class, () -> simulator.backstep(), "No backstep history", "history ends at the reset");
+
         simulator.load(Arrays.asList("tests/fixtures/infinite.asm"), Collections.emptyList(), "");
         Map<String, Object> limited = simulator.runUntilStop(100);
         require("step_limit".equals(limited.get("stopReason")) && "paused".equals(limited.get("status")), "step limit reason");
