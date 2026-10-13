@@ -206,6 +206,14 @@ limits of a RARS run.
   that lists the signals sharing its last name. nvc writes VCD with `--wave=tb.vcd --format=vcd`
   and GHDL with `--vcd=tb.vcd`; FST and GHW files, and files over `WAVE_MAX_BYTES`, are refused.
 
+  The result also gives the dump's first and last timestamps as `startTime` and `endTime`, such as
+  `"40 ns"`. The whole file is read to find them, and a file with no timestamp is an error. A row
+  for a time before the first timestamp or after the last one still has the values the file
+  implies, but those values were not recorded, so the row also has `"beyond": "before"` or
+  `"after"` and the table ends it with `(before start 5 ns)` or `(after end 40 ns)`. When no time
+  is inside the dump, the table starts with a line that says so, such as `The dump ends at 40 ns,
+  before every requested time.`
+
 - **`do_file_check`** — dry-run a Questa or ModelSim `.do` script without a simulator. Returns
   the files it compiles, in order, with each one's library, VHDL standard and whether it exists,
   plus the `vlib` libraries, the `vsim` top and any Tcl error with its file and line. `std` sets
