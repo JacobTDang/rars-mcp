@@ -81,11 +81,21 @@ export type EncodedInstruction =
   | { source: string; basic: string[]; words: EncodedWord[] }
   | { source: string; error: string };
 
+// conflictPolicy says what happens to an open RARS editor buffer with unsaved changes.
+export interface LoadRequest {
+  files: string[];
+  programArgs?: string[];
+  stdin?: string;
+  conflictPolicy: 'reject' | 'discard';
+}
+
 export interface SessionBackend {
   summary(): Promise<SessionSummary>;
   command(command: DebugCommand): Promise<MachineState>;
   inspect(request: InspectRequest): Promise<InspectResult>;
   modify(request: ModifyRequest): Promise<MachineState>;
+  // Only a live session loads another program; a headless session refuses.
+  load(request: LoadRequest): Promise<MachineState>;
   close(): Promise<void>;
   // Calls listener once if the backend stops working by itself, such as when its connection fails.
   onFailure(listener: (error: Error) => void): void;

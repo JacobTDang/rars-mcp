@@ -266,7 +266,6 @@ export function createToolHandlers(deps: ToolDependencies) {
       const command = input.command;
       let result: unknown;
       if (command.action === 'load') {
-        if (!(backend instanceof LiveClient)) throw new Error('Session is not a live RARS session');
         const files = await Promise.all(command.files.map((file) => deps.workspace.resolve(file)));
         result = await backend.load({ files, conflictPolicy: command.conflictPolicy, ...(command.programArgs === undefined ? {} : { programArgs: command.programArgs }), ...(command.stdin === undefined ? {} : { stdin: command.stdin }) });
       } else if (command.action === 'inspect') {

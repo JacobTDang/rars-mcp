@@ -5,7 +5,7 @@ import { createConnection, type Socket } from 'node:net';
 import { RarsError } from '../errors.js';
 import { describeExit, spawnBridge, stopBridge, watchStartup } from './bridge-process.js';
 import { BridgeConnection } from './connection.js';
-import type { DebugCommand, EncodedInstruction, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
+import type { DebugCommand, EncodedInstruction, InspectRequest, InspectResult, LoadRequest, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
 interface BridgeOptions {
   javaExecutable: string;
@@ -128,6 +128,12 @@ export class HeadlessSession implements SessionBackend {
     });
     this.updateState(result);
     return result as unknown as MachineState;
+  }
+
+  // A headless session debugs the program it started with, and nothing is sent to the bridge.
+  async load(_request: LoadRequest): Promise<MachineState> {
+    throw new Error('Session is not a live RARS session, so it cannot load a program. '
+      + 'Start a session for that program with rars_debug_start');
   }
 
   // The bridge holds nothing worth keeping, so it is killed, and close returns once it has exited.

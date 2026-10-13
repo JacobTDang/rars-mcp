@@ -5,6 +5,7 @@ import { SessionStore } from '../src/sessions/store.js';
 import type {
   DebugCommand,
   InspectRequest,
+  LoadRequest,
   MachineState,
   ModifyRequest,
   SessionBackend,
@@ -17,6 +18,7 @@ function backend(name: string): SessionBackend {
     command: async (_command: DebugCommand): Promise<MachineState> => ({ status: 'paused' }),
     inspect: async (_request: InspectRequest) => ({ status: 'paused' }),
     modify: async (_request: ModifyRequest): Promise<MachineState> => ({ status: 'paused' }),
+    load: async (_request: LoadRequest): Promise<MachineState> => ({ status: 'paused' }),
     close: vi.fn(async () => undefined),
     onFailure: () => undefined,
   };
@@ -134,6 +136,35 @@ describe('SessionStore', () => {
     release();
     await Promise.all([first, second]);
     expect(order).toEqual(['first-start', 'first-end', 'second']);
+  });
+
+  it('queues a load behind an earlier request, as other requests are', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const target = backend('loading');
+    target.command = async () => {
+      order.push('command-start');
+      await gate;
+      order.push('command-end');
+      return { status: 'paused' };
+    };
+    target.load = async (request) => {
+      order.push(`load ${request.files.join(' ')}`);
+      return { status: 'ready' };
+    };
+    const store = new SessionStore();
+    const session = store.get(store.add(target));
+
+    const running = session.command({ action: 'continue' });
+    const loaded = session.load({ files: ['/work/program.s'], conflictPolicy: 'reject' });
+    await Promise.resolve();
+    expect(order).toEqual(['command-start']);
+    release();
+
+    await expect(loaded).resolves.toEqual({ status: 'ready' });
+    await running;
+    expect(order).toEqual(['command-start', 'command-end', 'load /work/program.s']);
   });
 
   it('passes a pause on while an earlier command is still running, so it can stop that command', async () => {

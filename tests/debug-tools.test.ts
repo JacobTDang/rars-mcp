@@ -150,6 +150,28 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     await handlers.sessionClose({ sessionId });
   });
 
+  it('refuses a live load on a debug session and leaves the session usable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    execFileSync('cp', ['tests/fixtures/debug.asm', join(root, 'debug.asm')]);
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 3000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const started = await handlers.debugStart({ source: '.text\nmain:\n  li a0, 1\n  li a7, 10\n  ecall\n' });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+
+    try {
+      await expect(handlers.liveCommand({ sessionId, command: { action: 'load', files: ['debug.asm'], conflictPolicy: 'reject' } }))
+        .rejects.toThrow('Session is not a live RARS session, so it cannot load a program');
+      expect((await handlers.debugCommand({ sessionId, action: 'step' })).structuredContent).toMatchObject({ programCounter: '0x00400004' });
+    } finally {
+      await handlers.sessionClose({ sessionId });
+    }
+  });
+
   it('refuses to write x0 and writes nothing else from that request', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
     const handlers = createToolHandlers({
