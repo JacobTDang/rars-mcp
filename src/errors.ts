@@ -3,7 +3,9 @@ export type RarsErrorCode =
   | 'PATH_NOT_FOUND'
   | 'PATH_OUTSIDE_WORKSPACE'
   | 'SESSION_NOT_FOUND'
-  | 'SESSION_EXPIRED';
+  | 'SESSION_EXPIRED'
+  | 'BRIDGE_START_TIMEOUT'
+  | 'BRIDGE_START_FAILED';
 
 export class RarsError extends Error {
   readonly code: RarsErrorCode;

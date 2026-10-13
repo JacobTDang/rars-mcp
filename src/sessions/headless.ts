@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { delimiter } from 'node:path';
 import { createConnection, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
+import { spawnBridge, watchStartup } from './bridge-process.js';
 import type { DebugCommand, EncodedInstruction, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
 interface BridgeOptions {
@@ -70,30 +71,30 @@ export class HeadlessSession implements SessionBackend {
     }
   }
 
+  // The ready line, the connection and the hello reply all count against timeoutMs.
   private static async start(options: BridgeOptions): Promise<HeadlessSession> {
     const serverToken = options.bridgeToken ?? options.token;
-    const child = spawn(options.javaExecutable, [
+    const child = spawnBridge(options.javaExecutable, [
       '-cp', `${options.bridgeJar}${delimiter}${options.rarsJar}`,
       'dev.rarsmcp.server.BridgeServer', '--token', serverToken, '--port', '0',
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
-    const port = await new Promise<number>((resolve, reject) => {
-      const lines = createInterface({ input: child.stderr!, crlfDelay: Infinity });
-      const timer = setTimeout(() => reject(new Error('RARS bridge startup timed out')), options.timeoutMs);
-      child.once('error', reject);
-      child.once('exit', (code) => reject(new Error(`RARS bridge exited during startup (${code})`)));
-      lines.on('line', (line) => {
-        const match = line.match(/^RARS_MCP_PORT=(\d+)$/);
-        if (match) { clearTimeout(timer); resolve(Number(match[1])); }
-      });
-    });
-    const socket = createConnection({ host: '127.0.0.1', port });
-    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
-    const session = new HeadlessSession(child, socket, options.timeoutMs);
+    ]);
+    const startup = watchStartup(child, options.timeoutMs);
+    let socket: Socket | undefined;
     try {
-      await session.request('hello', { token: options.token });
+      const port = await startup.within(startup.port);
+      const connection = createConnection({ host: '127.0.0.1', port });
+      socket = connection;
+      await startup.within(new Promise<void>((resolve, reject) => {
+        connection.once('connect', resolve);
+        connection.once('error', reject);
+      }));
+      const session = new HeadlessSession(child, connection, options.timeoutMs);
+      await startup.within(session.request('hello', { token: options.token }));
+      startup.finish();
       return session;
     } catch (error) {
-      session.kill();
+      socket?.destroy();
+      await startup.abort();
       throw error;
     }
   }
