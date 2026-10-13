@@ -36,7 +36,7 @@ final class InstructionDecoder {
             case 0x13: // addi, slti ... and the shift-immediates
             case 0x1b: // addiw and its shift-immediates (RV64)
             case 0x67: // jalr
-            case 0x73: // ecall, ebreak, uret, wfi and the CSR instructions, which keep the CSR number in imm
+            case 0x73: // ecall, ebreak, uret, wfi and the CSR instructions, which keep the CSR number where imm would be
                 return "I";
             case 0x23: case 0x27: return "S"; // integer and floating-point stores
             case 0x63: return "B";
@@ -56,6 +56,7 @@ final class InstructionDecoder {
                         "funct2", bits(word, 26, 25), "rs3", bits(word, 31, 27));
             case "I":
                 if (isShift(word)) return shift(word);
+                if (isCsr(word)) return csr(word);
                 return fields("opcode", opcode(word), "rd", rd(word), "funct3", funct3(word), "rs1", rs1(word), "imm", word >> 20);
             case "S": // imm[11:5] in bits 31:25, imm[4:0] where rd would be
                 return fields("opcode", opcode(word), "funct3", funct3(word), "rs1", rs1(word), "rs2", rs2(word),
@@ -84,6 +85,18 @@ final class InstructionDecoder {
         int width = opcode(word) == 0x13 && InstructionSet.rv64 ? 6 : 5;
         return fields("opcode", opcode(word), "rd", rd(word), "funct3", funct3(word), "rs1", rs1(word),
                 "shamt", bits(word, 19 + width, 20), "funct" + (12 - width), bits(word, 31, 20 + width));
+    }
+
+    // csrrw, csrrs and csrrc have funct3 1 to 3 under SYSTEM, and csrrwi, csrrsi and csrrci the same with bit 2
+    // set; funct3 0 is ecall, ebreak, uret and wfi.
+    private static boolean isCsr(int word) {
+        return opcode(word) == 0x73 && (funct3(word) & 3) != 0;
+    }
+
+    // The CSR number is unsigned, 0xc00 for cycle. The csr*i forms keep a 5-bit unsigned immediate where rs1 would be.
+    private static Map<String, Object> csr(int word) {
+        return fields("opcode", opcode(word), "rd", rd(word), "funct3", funct3(word), (funct3(word) & 4) != 0 ? "uimm" : "rs1", rs1(word),
+                "csr", bits(word, 31, 20));
     }
 
     private static int opcode(int word) { return bits(word, 6, 0); }

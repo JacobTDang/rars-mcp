@@ -115,6 +115,9 @@ results and quotes RARS's reason.
   - `imm` is signed and already put back together for `S`, `B` and `J`; for `U` it is the 20-bit
     upper value. Shift-immediates are `I` with `shamt` and `funct7`; `fmadd` and the other fused
     multiply-adds are `R4` with `rs3` and `funct2`.
+  - CSR instructions, and pseudo-instructions such as `csrr` and `rdcycle`, are `I` with `csr` in
+    place of `imm`: the CSR number, unsigned, so `rdcycle t0` gives `"csr": 3072` (0xc00).
+    `csrrwi`, `csrrsi` and `csrrci` have `uimm`, their 5-bit unsigned immediate, in place of `rs1`.
   - A branch or jump target may be a number, read as a byte offset from the instruction:
     `beq x1, x2, -8`. RARS itself takes only a label there, so the tool puts a label at that offset.
   - The instructions are assembled one after another as one program, so one can branch to a label
