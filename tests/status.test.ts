@@ -5,7 +5,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/client';
 
 import { loadConfig } from '../src/config.js';
 import { createToolDependencies } from '../src/dependencies.js';
@@ -76,7 +76,7 @@ describe.runIf(process.env.RARS_JAR)('rars_status with RARS', () => {
       rars: { jar: process.env.RARS_JAR, exists: true, version: expect.stringMatching(/^\d+(\.\d+)+$/) },
       java: { executable: 'java', version: expect.stringMatching(/^\d/), home: expect.stringMatching(/\S/) },
       bridge: { jar: bridgeJar, exists: true, configured: true },
-      workspace: { roots: deps.workspace.roots, clientRoots: [] },
+      workspace: { roots: deps.workspace.roots, clientRoots: [], skippedClientRoots: [] },
       sessions: { count: 0 },
       live: { discoveryDir, configured: true },
       tclsh: {
@@ -298,13 +298,17 @@ describe('rars_status over MCP', () => {
   let close: (() => Promise<void>) | undefined;
   afterEach(async () => { await close?.(); close = undefined; });
 
-  async function serve(roots: string[]) {
+  type ListRoots = () => Promise<{ roots: Array<{ uri: string; name?: string }> }>;
+
+  function folders(roots: string[]): ListRoots {
+    return async () => ({ roots: roots.map((root) => ({ uri: pathToFileURL(root).href, name: 'project' })) });
+  }
+
+  async function serve(roots: string[] | ListRoots) {
     const configured = await mkdtemp(join(tmpdir(), 'rars-status-configured-'));
     const server = createMcpServer(await dependencies({ workspace: await Workspace.create(configured) }));
     const client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: { roots: {} } });
-    client.setRequestHandler('roots/list', async () => ({
-      roots: roots.map((root) => ({ uri: pathToFileURL(root).href, name: 'project' })),
-    }));
+    client.setRequestHandler('roots/list', typeof roots === 'function' ? roots : folders(roots));
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
@@ -320,22 +324,58 @@ describe('rars_status over MCP', () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
-      workspace: { roots: [await realpath(configured)], clientRoots: [await realpath(clientRoot)] },
+      workspace: { roots: [await realpath(configured)], clientRoots: [await realpath(clientRoot)], skippedClientRoots: [] },
     });
     expect(JSON.stringify(result.content)).toContain(
       `workspace: ok (${await realpath(configured)}; client roots: ${await realpath(clientRoot)})`,
     );
   });
 
-  it('reports client roots that cannot be read and still succeeds', async () => {
+  it('lists the client roots it skipped with the reason', async () => {
+    const clientRoot = await mkdtemp(join(tmpdir(), 'rars-status-client-'));
     const missingRoot = join(await mkdtemp(join(tmpdir(), 'rars-status-client-')), 'missing');
-    const { client, configured } = await serve([missingRoot]);
+    const { client, configured } = await serve(async () => ({
+      roots: [{ uri: pathToFileURL(missingRoot).href }, { uri: 'file://otherhost/project' }, { uri: pathToFileURL(clientRoot).href }],
+    }));
 
     const result = await client.callTool({ name: 'rars_status', arguments: {} });
 
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toMatchObject({
-      workspace: { roots: [await realpath(configured)], error: expect.stringContaining('ENOENT') },
+    const missingReason = `ENOENT: no such file or directory, realpath '${missingRoot}'`;
+    expect(result.structuredContent).toHaveProperty('workspace', {
+      roots: [await realpath(configured)],
+      clientRoots: [await realpath(clientRoot)],
+      skippedClientRoots: [
+        { root: missingRoot, reason: missingReason },
+        { root: 'file://otherhost/project', reason: expect.stringContaining('host must be "localhost" or empty') },
+      ],
     });
+    const [, remote] = (result.structuredContent as { workspace: { skippedClientRoots: Array<{ reason: string }> } })
+      .workspace.skippedClientRoots;
+    expect(lines(result)[3]).toBe(`workspace: ok (${await realpath(configured)}; client roots: ${await realpath(clientRoot)}; `
+      + `skipped client roots: ${missingRoot} (${missingReason}), file://otherhost/project (${remote!.reason}))`);
+  });
+
+  it('reports a failed roots/list and asks again on the next call', async () => {
+    const clientRoot = await mkdtemp(join(tmpdir(), 'rars-status-client-'));
+    let asked = 0;
+    const { client, configured } = await serve(async () => {
+      asked += 1;
+      if (asked === 1) throw new ProtocolError(ProtocolErrorCode.InternalError, 'roots are not ready');
+      return folders([clientRoot])();
+    });
+
+    const failed = await client.callTool({ name: 'rars_status', arguments: {} });
+    const retried = await client.callTool({ name: 'rars_status', arguments: {} });
+
+    expect(failed.isError).toBeFalsy();
+    expect(failed.structuredContent).toHaveProperty('workspace', {
+      roots: [await realpath(configured)], error: expect.stringContaining('roots are not ready'),
+    });
+    expect(lines(failed)[3]).toMatch(/^workspace: error: Could not list the client's roots: .*roots are not ready/);
+    expect(retried.structuredContent).toHaveProperty('workspace', {
+      roots: [await realpath(configured)], clientRoots: [await realpath(clientRoot)], skippedClientRoots: [],
+    });
+    expect(asked).toBe(2);
   });
 });

@@ -1,5 +1,3 @@
-import { fileURLToPath } from 'node:url';
-
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { createDoFileCheckHandler, doFileCheckSchema } from './tools/dofile.js';
@@ -94,10 +92,7 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
   // workspace follows the client instead of the folder this server started in.
   server.server.oninitialized = () => {
     if (server.server.getClientCapabilities()?.roots === undefined) return;
-    dependencies.workspace.useRootsProvider(async () => {
-      const { roots } = await server.server.listRoots();
-      return roots.filter((root) => root.uri.startsWith('file://')).map((root) => fileURLToPath(root.uri));
-    });
+    dependencies.workspace.useRootsProvider(async () => (await server.server.listRoots()).roots.map((root) => root.uri));
   };
   server.server.setNotificationHandler(
     'notifications/roots/list_changed', () => dependencies.workspace.rootsChanged(),
