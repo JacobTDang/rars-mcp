@@ -20,7 +20,7 @@ async function fakeJava(lines: string[]): Promise<{ executable: string; director
 function startBridge(javaExecutable: string, timeoutMs: number): Promise<HeadlessSession> {
   return HeadlessSession.create({
     javaExecutable, bridgeJar: '/unused/bridge.jar', rarsJar: '/unused/rars.jar', token: 'test-secret',
-    files: ['/unused/program.asm'], timeoutMs,
+    files: ['/unused/program.asm'], timeoutMs, maxOutputBytes: 65_536,
   });
 }
 
@@ -131,7 +131,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
       rarsJar: process.env.RARS_JAR!,
       token: 'test-secret',
       files: [resolve('tests/fixtures/debug.asm')],
-      timeoutMs: 3_000,
+      timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     const initial = await session.inspect({ registers: ['a0'] }) as { programCounter: string };
@@ -160,7 +160,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     await expect(session.modify({ registers: { t0: '0x11', nosuch: '0x22', t1: '0x33' } })).rejects.toThrow('Unknown register: nosuch');
@@ -186,7 +186,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     await session.modify({
@@ -220,7 +220,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/infinite.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/infinite.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     expect(await session.command({ action: 'continue', maxSteps: 50 })).toMatchObject({ status: 'paused', stopReason: 'step_limit' });
@@ -231,7 +231,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     expect(await session.command({ action: 'breakpoint_add', address: 'debug.asm:7' })).toMatchObject({ breakpoints: ['0x00400008'] });
@@ -245,7 +245,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     await session.command({ action: 'step' });
@@ -260,7 +260,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     expect(await session.command({ action: 'continue' })).toMatchObject({ stopReason: 'exited' });
@@ -277,7 +277,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     const state = await session.inspect({ registers: ['pc'] });
@@ -290,7 +290,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     const withSymbols = await session.inspect({ includeSymbols: true }) as { programCounter: string; symbols: unknown[] };
@@ -306,7 +306,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     const state = await session.inspect({ includeInstructions: true }) as { instructions: unknown[] };
@@ -320,7 +320,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm'), resolve('tests/fixtures/debug-helper.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm'), resolve('tests/fixtures/debug-helper.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
     const addresses = async (request: Parameters<HeadlessSession['inspect']>[0]) =>
       ((await session.inspect(request)) as { instructions: Array<{ address: string }> }).instructions.map((item) => item.address);
@@ -342,7 +342,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
     const addresses = async (request: Parameters<HeadlessSession['inspect']>[0]) =>
       ((await session.inspect(request)) as { instructions: Array<{ address: string }> }).instructions.map((item) => item.address);
@@ -360,7 +360,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [join(directory, 'long.asm')], timeoutMs: 3_000,
+      files: [join(directory, 'long.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     });
 
     expect(await session.inspect({ instructions: { from: 'main', to: '0x0040031c' } })).toHaveProperty('instructions.length', 200);
@@ -373,7 +373,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await expect(HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'test-secret',
-      files: [resolve('tests/fixtures/invalid.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/invalid.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     })).rejects.toThrow(/invalid\.asm line 3.*definitely_not_an_instruction/);
   });
 
@@ -381,7 +381,7 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await expect(HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
       rarsJar: process.env.RARS_JAR!, token: 'client-token', bridgeToken: 'different-token',
-      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000, maxOutputBytes: 65_536,
     })).rejects.toThrow('Invalid bridge token');
   });
 });

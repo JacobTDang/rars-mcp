@@ -19,6 +19,7 @@ token="$(<"$token_file")"
 rm -f "$port_file"
 java -cp "java/bridge/build/rars-mcp-bridge.jar:.cache/rars1_6.jar" \
   dev.rarsmcp.gui.DesktopBridgeMain --token "$token" --port 0 \
+  --max-output-bytes "${RARS_MAX_OUTPUT_BYTES:-1048576}" \
   2> >(
     while IFS= read -r line; do
       if [[ "$line" == RARS_MCP_PORT=* ]]; then

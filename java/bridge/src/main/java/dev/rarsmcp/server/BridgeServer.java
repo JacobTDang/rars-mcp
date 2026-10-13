@@ -21,24 +21,26 @@ import java.util.Map;
 
 public final class BridgeServer {
     private final String token;
-    private final RarsSimulator simulator = new RarsSimulator();
+    private final RarsSimulator simulator;
     private final BridgeHooks hooks;
     private final String mode;
 
-    private BridgeServer(String token, String mode, BridgeHooks hooks) {
+    private BridgeServer(String token, String mode, BridgeHooks hooks, long maxOutputBytes) {
         this.token = token;
         this.mode = mode;
         this.hooks = hooks;
+        this.simulator = new RarsSimulator(maxOutputBytes);
     }
 
     public static void main(String[] args) throws Exception {
         String token = argument(args, "--token");
         int port = Integer.parseInt(argument(args, "--port"));
-        run(token, port, "headless", BridgeHooks.NONE);
+        run(token, port, "headless", BridgeHooks.NONE, Long.parseLong(argument(args, "--max-output-bytes")));
     }
 
-    public static void run(String token, int port, String mode, BridgeHooks hooks) throws Exception {
-        BridgeServer bridge = new BridgeServer(token, mode, hooks);
+    // maxOutputBytes: the most program output, stdout and stderr together, kept from one run.
+    public static void run(String token, int port, String mode, BridgeHooks hooks, long maxOutputBytes) throws Exception {
+        BridgeServer bridge = new BridgeServer(token, mode, hooks, maxOutputBytes);
         try (ServerSocket server = new ServerSocket(port, 16, InetAddress.getLoopbackAddress())) {
             System.err.println("RARS_MCP_PORT=" + server.getLocalPort());
             System.err.flush();
@@ -97,12 +99,11 @@ public final class BridgeServer {
                 hooks.afterMutation();
                 return BridgeResponse.success(request.id, commandResult);
             case "inspect": {
-                Map<String, Object> result = new LinkedHashMap<>(simulator.snapshot());
+                // Everything here that can fail comes before the snapshot, which hands over the new output.
                 Map<String, Object> registers = new LinkedHashMap<>();
                 for (String name : strings(payload.get("registers"))) {
                     registers.put(name, Words.word(((Number) simulator.readRegister(name)).longValue(), 4));
                 }
-                result.put("registers", registers);
                 List<Object> memory = new ArrayList<>();
                 Object ranges = payload.get("memory");
                 if (ranges instanceof List) for (Object item : (List<?>) ranges) {
@@ -113,13 +114,16 @@ public final class BridgeServer {
                     entry.putAll(Words.word(((Number) simulator.readMemory(address, width)).longValue(), width));
                     memory.add(entry);
                 }
-                result.put("memory", memory);
-                if (Boolean.TRUE.equals(payload.get("includeSymbols"))) result.put("symbols", simulator.symbols());
+                Object symbols = Boolean.TRUE.equals(payload.get("includeSymbols")) ? simulator.symbols() : null;
                 Object window = payload.get("instructions");
                 boolean everyInstruction = Boolean.TRUE.equals(payload.get("includeInstructions"));
                 if (everyInstruction && window != null) throw new IllegalArgumentException("includeInstructions and instructions cannot be combined");
-                if (everyInstruction) result.put("instructions", simulator.instructions());
-                if (window != null) result.put("instructions", instructions(window));
+                Object listed = everyInstruction ? simulator.instructions() : window != null ? instructions(window) : null;
+                Map<String, Object> result = new LinkedHashMap<>(simulator.snapshot());
+                result.put("registers", registers);
+                result.put("memory", memory);
+                if (symbols != null) result.put("symbols", symbols);
+                if (listed != null) result.put("instructions", listed);
                 return BridgeResponse.success(request.id, result);
             }
             case "modify":

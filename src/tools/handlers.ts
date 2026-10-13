@@ -61,7 +61,7 @@ async function resolveDumps(
       token: deps.bridgeToken, files,
       ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
       ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
-      timeoutMs: deps.timeoutMs,
+      timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes,
     });
     try {
       const inspected = await session.inspect({ includeSymbols: true }) as { symbols?: Array<{ name: string; address: string }> };
@@ -182,7 +182,7 @@ export function createToolHandlers(deps: ToolDependencies) {
           token: deps.bridgeToken, files,
           ...(input.programArgs === undefined ? {} : { programArgs: input.programArgs }),
           ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
-          timeoutMs: deps.timeoutMs,
+          timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes,
         });
       } catch (error) {
         await source?.cleanup();

@@ -55,7 +55,8 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Step, backstep, continue, pause, reset, terminate, or manage breakpoints.', inputSchema: debugCommandSchema,
   }, handlers.debugCommand);
   server.registerTool('rars_inspect', {
-    description: 'Inspect registers, bounded memory, output, and state in a RARS session.', inputSchema: inspectSchema,
+    description: 'Inspect registers, bounded memory, state, and the program output written since the previous reply in a RARS session.',
+    inputSchema: inspectSchema,
   }, handlers.inspect);
   server.registerTool('rars_modify', {
     description: 'Write registers or bounded memory in a RARS session.', inputSchema: modifySchema,

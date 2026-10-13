@@ -8,12 +8,13 @@ public final class DesktopBridgeMain {
     public static void main(String[] args) throws Exception {
         String token = argument(args, "--token");
         int port = Integer.parseInt(argument(args, "--port"));
+        long maxOutputBytes = Long.parseLong(argument(args, "--max-output-bytes"));
         Thread gui = new Thread(() -> Launch.main(new String[] { "g" }), "rars-gui-launcher");
         gui.start();
         long deadline = System.currentTimeMillis() + 15_000;
         while (Globals.getGui() == null && System.currentTimeMillis() < deadline) Thread.sleep(50);
         if (Globals.getGui() == null) throw new IllegalStateException("RARS GUI startup timed out");
-        BridgeServer.run(token, port, "live", new GuiBridgeHooks());
+        BridgeServer.run(token, port, "live", new GuiBridgeHooks(), maxOutputBytes);
     }
 
     private static String argument(String[] args, String name) {

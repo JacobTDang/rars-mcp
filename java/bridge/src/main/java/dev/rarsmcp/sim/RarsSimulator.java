@@ -20,7 +20,9 @@ import rars.riscv.hardware.Register;
 import rars.riscv.hardware.RegisterFile;
 import rars.simulator.BackStepper;
 import rars.simulator.Simulator;
+import rars.util.SystemIO;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -40,7 +42,9 @@ public final class RarsSimulator {
     private static final Pattern FILE_LINE = Pattern.compile("(.+):(\\d+)");
     private static final int MAX_INSTRUCTION_WINDOW = 200;
 
+    private final long maxOutputBytes;
     private Program program;
+    private ProgramOutput output;
     private Options options;
     private List<String> files = new ArrayList<>();
     private List<RISCVprogram> sources = new ArrayList<>();
@@ -51,6 +55,12 @@ public final class RarsSimulator {
     private String stopReason;
     private String exception;
     private final Set<Integer> breakpoints = new TreeSet<>();
+
+    // maxOutputBytes: the most stdout and stderr, together, kept from one run.
+    public RarsSimulator(long maxOutputBytes) {
+        if (maxOutputBytes <= 0) throw new IllegalArgumentException("The output limit must be a positive number of bytes, not " + maxOutputBytes);
+        this.maxOutputBytes = maxOutputBytes;
+    }
 
     public synchronized void load(List<String> sourceFiles, List<String> programArguments, String standardInput) throws Exception {
         options = new Options();
@@ -91,6 +101,7 @@ public final class RarsSimulator {
     // Starts a run: load and reset both come here, and neither can be stepped back past.
     private void setup() throws Exception {
         program.setup(new ArrayList<>(arguments), stdin);
+        captureOutput();
         RISCVprogram code = code();
         clearHistory(code);
         Globals.program = code;
@@ -438,13 +449,13 @@ public final class RarsSimulator {
         }
     }
 
+    // The machine state, with the output written since the previous snapshot.
     public synchronized Map<String, Object> snapshot() {
         ensureLoaded();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", status);
         result.put("programCounter", Words.address(RegisterFile.getProgramCounter()));
-        result.put("stdout", program.getSTDOUT());
-        result.put("stderr", program.getSTDERR());
+        result.putAll(output.take(status.equals("terminated")));
         result.put("exitCode", program.getExitCode());
         if (stopReason != null) result.put("stopReason", stopReason);
         if (exception != null) result.put("exception", exception);
@@ -456,6 +467,15 @@ public final class RarsSimulator {
 
     private BackStepper backStepper() throws Exception {
         return code().getBackStepper();
+    }
+
+    // RARS's setup gives the program output buffers with no limit. These are the same streams, stdin
+    // included, with a ProgramOutput for stdout and stderr.
+    private void captureOutput() throws Exception {
+        output = new ProgramOutput(maxOutputBytes);
+        Field streams = Program.class.getDeclaredField("fds");
+        streams.setAccessible(true);
+        streams.set(program, new SystemIO.Data(new ByteArrayInputStream(stdin.getBytes()), output.stdout(), output.stderr()));
     }
 
     // A BackStepper cannot be emptied, so this gives the program a new one, as assembling it again would.

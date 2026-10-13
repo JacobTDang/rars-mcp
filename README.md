@@ -149,6 +149,21 @@ results and quotes RARS's reason.
     until the session is reset.
   - `reset` starts the program again with no backstep history, so `backstep` cannot return to the
     previous run. With nothing to undo, `backstep` fails with `No backstep history`.
+  - Every reply from `rars_debug_command`, `rars_inspect` and `rars_modify` has in `stdout` and
+    `stderr` only the program output written since the previous reply from that session, so a
+    reply with nothing new has `""`. `stdoutBytes` and `stderrBytes` count the bytes of each stream
+    handed over since the program was loaded or reset, this reply's included. Output is read as
+    UTF-8, and a character split across two writes is held back until its last byte is written.
+  - stdout and stderr together keep at most `RARS_MAX_OUTPUT_BYTES` from one run, as with
+    `rars_run`. Past that the rest is dropped, and `truncated` is `true` until the session is reset:
+
+    ```json
+    { "status": "paused", "stopReason": "step_limit", "stdout": "0123456789abcdef\n0123...",
+      "stderr": "", "stdoutBytes": 4096, "stderrBytes": 0, "truncated": true }
+    ```
+
+    In the visible desktop session, RARS shows the program's output in its Run I/O pane, so
+    `stdout` and `stderr` stay empty there.
 - **`rars_inspect`** — registers (including `pc`) and bounded memory as `{ hex, signed }`, plus
   `includeSymbols` for the symbol table and `instructions` for a window of the assembled program
   with each instruction's address, machine code, basic form, source line and file.
@@ -331,7 +346,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_BRIDGE_HOST` | `127.0.0.1` | Host of the visible desktop session |
 | `RARS_LIVE_DISCOVERY_DIR` | `.runtime` | Where the launcher writes its port and token |
 | `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, and for starting the Java bridge; at most 2147483647 |
-| `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run |
+| `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run, in `rars_run` and in a debugger session |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes; at most 2147483647 |
 | `WAVE_MAX_BYTES` | `67108864` | Largest waveform file `wave_query` reads, and the most an FST file or any part of it may unpack to |
