@@ -130,6 +130,8 @@ program. For file-backed dumps, the target folder must already exist.
 - **`rars_inspect`** — registers (including `pc`) and bounded memory as `{ hex, signed }`, plus
   `includeSymbols` for the symbol table and `instructions` for a window of the assembled program
   with each instruction's address, machine code, basic form, source line and file.
+  - `signed` is a number, except for memory read with `length: 8`, where it is a decimal string
+    such as `"-9223372036854775808"`: a JSON number cannot hold every 64-bit value exactly.
   - `instructions: { around, count }` returns `count` instructions (10 by default, at most 200)
     centred on `around`: `pc` (the default), a code label, an address, or `file:line`. With an
     even `count` the extra instruction comes after. `instructions: {}` is the 10 around `pc`.
@@ -139,10 +141,11 @@ program. For file-backed dumps, the target folder must already exist.
     no instruction, as after the program exits: the window then ends at the last instruction below
     `pc`, so `instructions: {}` shows the program's last 10.
   - `includeInstructions: true` still returns the whole program, but is deprecated.
-- **`rars_modify`** — write registers or memory. Values are decimal or `0x` hex, signed or unsigned,
-  and must fit the register or the `width`. Every register name, address, alignment and value is
-  checked before anything is written, so a rejected request changes nothing. An 8-byte write must
-  start on a word boundary, as an 8-byte read must.
+- **`rars_modify`** — write registers or memory. Values are decimal or `0x` hex strings, signed or
+  unsigned, and must fit the register or the `width`; a `width: 8` value is exact across all 64
+  bits, from `"-9223372036854775808"` to `"0xffffffffffffffff"`. Every register name, address,
+  alignment and value is checked before anything is written, so a rejected request changes
+  nothing. An 8-byte write must start on a word boundary, as an 8-byte read must.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.
 

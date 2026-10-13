@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
 import { spawnBridge, watchStartup } from './bridge-process.js';
-import type { DebugCommand, EncodedInstruction, InspectRequest, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
+import type { DebugCommand, EncodedInstruction, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
 interface BridgeOptions {
   javaExecutable: string;
@@ -109,14 +109,15 @@ export class HeadlessSession implements SessionBackend {
     return result as unknown as MachineState;
   }
 
-  async inspect(request: InspectRequest): Promise<unknown> {
-    return this.request('inspect', {
+  async inspect(request: InspectRequest): Promise<InspectResult> {
+    const result = await this.request('inspect', {
       registers: request.registers ?? [],
       memory: (request.memory ?? []).map(({ address, length }) => ({ address, width: length })),
       includeSymbols: request.includeSymbols ?? false,
       includeInstructions: request.includeInstructions ?? false,
       ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
     });
+    return result as unknown as InspectResult;
   }
 
   async modify(request: ModifyRequest): Promise<MachineState> {

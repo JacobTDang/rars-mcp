@@ -11,14 +11,16 @@ public final class Words {
         return String.format("0x%08x", value);
     }
 
-    // A value `width` bytes wide as { hex, signed }, with the hex zero-padded to that width.
+    // A value `width` bytes wide as { hex, signed }, with the hex zero-padded to that width. For 8 bytes,
+    // signed is a decimal string: a JSON number is a double, which cannot hold every 64-bit value.
     public static Map<String, Object> word(long value, int width) {
         int bits = width * 8;
         long raw = bits == 64 ? value : value & ((1L << bits) - 1);
         long signed = bits == 64 ? raw : (raw << (64 - bits)) >> (64 - bits);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("hex", String.format("0x%0" + (width * 2) + "x", raw));
-        result.put("signed", signed);
+        if (width == 8) result.put("signed", Long.toString(signed));
+        else result.put("signed", signed);
         return result;
     }
 
