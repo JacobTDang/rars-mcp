@@ -1,9 +1,12 @@
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { z } from 'zod';
 
 import { RarsError } from '../errors.js';
-import { analyzeSteps, runDoFile, vhdlStandards, type DoFileError, type DoFileStep, type LocatedPath, type StepAnalysis } from '../vhdl/dofile.js';
+import {
+  analyzeSteps, runDoFile, vhdlStandards, type DoFileError, type DoFileStep, type ListFile, type LocatedPath, type PathKind,
+  type StepAnalysis,
+} from '../vhdl/dofile.js';
 import type { Workspace } from '../workspace.js';
 import type { ToolDependencies, ToolResult } from './handlers.js';
 
@@ -21,6 +24,7 @@ interface CompileEntry {
   exists: boolean;
   library: string;
   std?: string;
+  list?: string;
   order: number;
 }
 
@@ -35,10 +39,18 @@ interface DoFileReport {
   errors: DoFileError[];
 }
 
-// Questa resolves a script's paths from the folder it runs in, assumed here to be the script's own.
-function locator(workspace: Workspace, cwd: string) {
-  return async (path: string): Promise<LocatedPath> => {
-    const target = resolve(cwd, path);
+type CompileState = PathKind | 'outside';
+type Locate = (path: string, folder: string) => Promise<LocatedPath>;
+
+const stateNotes: Record<CompileState, string> = {
+  file: '', directory: ', a directory', other: ', not a file', missing: ', missing', outside: ', outside the workspace',
+};
+
+// Resolves a path from the folder the script is in. Questa resolves a script's paths from the folder it
+// runs in, assumed here to be the script's own until a cd moves it.
+function locator(workspace: Workspace): Locate {
+  return async (path, folder) => {
+    const target = resolve(folder, path);
     let canonical: string;
     try {
       canonical = await workspace.resolve(target);
@@ -54,14 +66,34 @@ function locator(workspace: Workspace, cwd: string) {
   };
 }
 
-function summarize(doFile: string, report: DoFileReport): string {
+function listReader(locate: Locate) {
+  return async (path: string, folder: string): Promise<ListFile> => {
+    let located: LocatedPath;
+    try {
+      located = await locate(path, folder);
+    } catch (error) {
+      if (error instanceof RarsError && error.code === 'PATH_OUTSIDE_WORKSPACE') {
+        return { error: `List file is outside the workspace folders: ${path}` };
+      }
+      throw error;
+    }
+    if (located.kind === 'missing') return { error: `No such list file: ${path}` };
+    if (located.kind !== 'file') return { error: `List file is not a file: ${path}` };
+    return { path: located.path, text: await readFile(located.path, 'utf8') };
+  };
+}
+
+function summarize(doFile: string, report: DoFileReport, states: readonly CompileState[]): string {
   const count = report.compiles.length;
+  const folders = report.steps.flatMap((step) => (step.folder === undefined ? [] : [step.folder]));
   const lines = [
     `${basename(doFile)}: ${count} ${count === 1 ? 'file' : 'files'} to compile, ${report.missing.length} missing.`,
     `Paths resolve from ${report.cwd}, assuming Questa runs the script from its own folder.`,
-    ...report.compiles.map(({ file, library, std, exists, order }) => {
-      const state = exists ? '' : report.missing.includes(file) ? ', missing' : ', outside the workspace';
-      return `${order}. ${file} into ${library}${std === undefined ? '' : `, std ${std}`}${state}`;
+    ...(folders.length === 0 ? [] : [`cd moves to ${folders.join(', then ')}.`]),
+    ...report.compiles.map(({ file, resolved, library, std, list, order }, index) => {
+      const shown = resolved === resolve(report.cwd, file) ? '' : ` (${relative(report.cwd, resolved) || '.'})`;
+      return `${order}. ${file}${shown} into ${library}${std === undefined ? '' : `, std ${std}`}`
+        + `${list === undefined ? '' : `, listed in ${list}`}${stateNotes[states[index]!]}`;
     }),
   ];
   if (report.libraries.length > 0) lines.push(`Libraries created: ${report.libraries.join(', ')}`);
@@ -80,25 +112,32 @@ export function createDoFileCheckHandler(deps: DoFileDependencies) {
     const doFile = await deps.workspace.resolve(input.path);
     if (!(await stat(doFile)).isFile()) throw new Error(`Not a file: ${input.path}`);
     const cwd = dirname(doFile);
-    const locate = locator(deps.workspace, cwd);
+    const locate = locator(deps.workspace);
     const run = await runDoFile({
       tclshExecutable: deps.tclshExecutable, doFile, cwd, timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes, locate,
     });
-    const analysis = analyzeSteps(run.steps, input.std);
+    const analysis = await analyzeSteps(run.steps, {
+      folder: cwd, ...(input.std === undefined ? {} : { std: input.std }), readList: listReader(locate),
+    });
 
-    const errors = [...run.errors];
+    const errors = [...run.errors, ...analysis.errors];
     const compiles: CompileEntry[] = [];
+    const states: CompileState[] = [];
     const missing = new Set<string>();
-    for (const compile of analysis.compiles) {
-      let exists = false;
+    for (const { folder, ...compile } of analysis.compiles) {
+      let state: CompileState;
       try {
-        exists = (await locate(compile.file)).kind === 'file';
-        if (!exists) missing.add(compile.file);
+        state = (await locate(compile.file, folder)).kind;
       } catch (error) {
         if (!(error instanceof RarsError && error.code === 'PATH_OUTSIDE_WORKSPACE')) throw error;
-        errors.push({ message: `Compiled file is outside the workspace folders: ${compile.file}` });
+        state = 'outside';
       }
-      compiles.push({ ...compile, resolved: resolve(cwd, compile.file), exists });
+      if (state === 'missing') missing.add(compile.file);
+      else if (state === 'outside') errors.push({ message: `Compiled file is outside the workspace folders: ${compile.file}` });
+      else if (state === 'directory') errors.push({ message: `Compiled path is a directory, not a file: ${compile.file}` });
+      else if (state === 'other') errors.push({ message: `Compiled path is not a file: ${compile.file}` });
+      compiles.push({ ...compile, resolved: resolve(folder, compile.file), exists: state !== 'missing' && state !== 'outside' });
+      states.push(state);
     }
 
     const report: DoFileReport = {
@@ -112,7 +151,7 @@ export function createDoFileCheckHandler(deps: DoFileDependencies) {
       errors,
     };
     return {
-      content: [{ type: 'text', text: summarize(doFile, report) }],
+      content: [{ type: 'text', text: summarize(doFile, report, states) }],
       structuredContent: report as unknown as Record<string, unknown>,
       ...(report.ok ? {} : { isError: true }),
     };
