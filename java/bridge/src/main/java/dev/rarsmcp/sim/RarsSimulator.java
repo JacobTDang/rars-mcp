@@ -7,10 +7,12 @@ import rars.ProgramStatement;
 import rars.RISCVprogram;
 import rars.SimulationException;
 import rars.Globals;
+import rars.Settings;
 import rars.api.Options;
 import rars.api.Program;
 import rars.assembler.Symbol;
 import rars.assembler.SymbolTable;
+import rars.riscv.hardware.AddressErrorException;
 import rars.riscv.hardware.ControlAndStatusRegisterFile;
 import rars.riscv.hardware.FloatingPointRegisterFile;
 import rars.riscv.hardware.Memory;
@@ -226,7 +228,7 @@ public final class RarsSimulator {
         return Integer.toUnsignedLong(program.getRegisterValue(name));
     }
 
-    public synchronized void setRegister(String name, int value) {
+    synchronized void setRegister(String name, int value) {
         ensureLoaded();
         if (name.equals("pc")) { RegisterFile.setProgramCounter(value); return; }
         requireKnownRegister(name);
@@ -358,7 +360,63 @@ public final class RarsSimulator {
         }
     }
 
-    public synchronized void writeMemory(int address, int width, long value) throws Exception {
+    // Writes registers, then memory, after checking every name, address and value, so a rejected
+    // request changes nothing. registers maps a name to a value; each memory write is { address, width, value }.
+    public synchronized void modify(Map<?, ?> registers, List<?> memory) throws Exception {
+        ensureLoaded();
+        Map<String, Integer> registerValues = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : registers.entrySet()) {
+            String name = String.valueOf(entry.getKey());
+            if (!name.equals("pc")) requireKnownRegister(name);
+            registerValues.put(name, (int) Words.parseValue(entry.getValue(), 4, name));
+        }
+        List<long[]> writes = new ArrayList<>();
+        for (Object item : memory) {
+            if (!(item instanceof Map)) throw new IllegalArgumentException("Each memory write must be an object");
+            Map<?, ?> write = (Map<?, ?>) item;
+            int address = Words.parseAddress(write.get("address"));
+            int width = width(write.get("width"));
+            long value = Words.parseValue(write.get("value"), width, Words.address(address));
+            checkStore(address, width);
+            writes.add(new long[] { address, width, value });
+        }
+        for (Map.Entry<String, Integer> entry : registerValues.entrySet()) setRegister(entry.getKey(), entry.getValue());
+        for (long[] write : writes) writeMemory((int) write[0], (int) write[1], write[2]);
+    }
+
+    private static int width(Object value) {
+        String text = String.valueOf(value);
+        if (!text.matches("[1248]")) throw new IllegalArgumentException("Width must be 1, 2, 4, or 8");
+        return Integer.parseInt(text);
+    }
+
+    // The checks RARS makes when it stores width bytes, with its messages, so all of them can pass before
+    // anything is written. RARS stores 8 bytes as two words, the high one first, and does not check that
+    // they are aligned; here they must be on a word boundary, as RARS needs to read them back.
+    private static void checkStore(int address, int width) throws AddressErrorException {
+        if (width == 2 && address % 2 != 0) {
+            throw new AddressErrorException("store address not aligned on halfword boundary ", SimulationException.STORE_ADDRESS_MISALIGNED, address);
+        }
+        if (width >= 4 && !Memory.wordAligned(address)) {
+            throw new AddressErrorException("Store address not aligned to word boundary ", SimulationException.STORE_ADDRESS_MISALIGNED, address);
+        }
+        if (width == 8) checkStoreSegment(address + 4);
+        checkStoreSegment(address);
+    }
+
+    // Where Memory.set accepts an aligned store.
+    private static void checkStoreSegment(int address) throws AddressErrorException {
+        if (Memory.inDataSegment(address) || (address > Memory.stackLimitAddress && address <= Memory.stackBaseAddress)) return;
+        if (address >= Memory.memoryMapBaseAddress && address < Memory.memoryMapLimitAddress) return;
+        if (!Memory.inTextSegment(address)) {
+            throw new AddressErrorException("address out of range ", SimulationException.STORE_ACCESS_FAULT, address);
+        }
+        if (!Globals.getSettings().getBooleanSetting(Settings.Bool.SELF_MODIFYING_CODE_ENABLED)) {
+            throw new AddressErrorException("Cannot write directly to text segment!", SimulationException.STORE_ACCESS_FAULT, address);
+        }
+    }
+
+    synchronized void writeMemory(int address, int width, long value) throws Exception {
         ensureLoaded();
         switch (width) {
             case 1: program.getMemory().setByte(address, (int) value); break;

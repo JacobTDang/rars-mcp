@@ -156,6 +156,32 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     expect(session.isClosed()).toBe(true);
   });
 
+  it('applies none of a modify request when one entry is rejected', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    await expect(session.modify({ registers: { t0: '0x11', nosuch: '0x22', t1: '0x33' } })).rejects.toThrow('Unknown register: nosuch');
+    await expect(session.modify({
+      memory: [
+        { address: '0x10010000', width: 4, value: '0x55' },
+        { address: '0x7', width: 4, value: '0x66' },
+        { address: '0x10010004', width: 4, value: '0x77' },
+      ],
+    })).rejects.toThrow('Store address not aligned to word boundary 0x00000007');
+    await expect(session.modify({ registers: { t0: '0x11' }, memory: [{ address: '0x10010000', width: 1, value: '0x1ff' }] }))
+      .rejects.toThrow('Value for 0x10010000 does not fit in 1 byte: 0x1ff');
+    expect(await session.inspect({
+      registers: ['t0', 't1'], memory: [{ address: '0x10010000', length: 4 }, { address: '0x10010004', length: 4 }],
+    })).toMatchObject({
+      registers: { t0: { hex: '0x00000000' }, t1: { hex: '0x00000000' } },
+      memory: [{ hex: '0x00000000' }, { hex: '0x00000000' }],
+    });
+    await session.close();
+  });
+
   it('reports a step-limit stop on continue', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),

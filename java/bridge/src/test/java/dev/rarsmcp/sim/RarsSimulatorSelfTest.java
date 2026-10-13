@@ -1,8 +1,10 @@
 package dev.rarsmcp.sim;
 
 import rars.Globals;
+import rars.Settings;
 import rars.riscv.BasicInstruction;
 import rars.riscv.Instruction;
+import rars.riscv.hardware.AddressErrorException;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -13,6 +15,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public final class RarsSimulatorSelfTest {
     public static void main(String[] args) throws Exception {
@@ -134,8 +137,103 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalStateException.class, () -> simulator.encode(Arrays.asList("nop")),
                 "Encoding needs a bridge with no program loaded", "encode with a program loaded");
 
+        modify();
+        storeChecks();
         encode();
         System.out.println("RarsSimulatorSelfTest PASS");
+    }
+
+    // A rejected request changes nothing, whichever entry is wrong.
+    private static void modify() throws Exception {
+        RarsSimulator simulator = new RarsSimulator();
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        Map<String, Object> none = Collections.emptyMap();
+
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("t0", "0x11", "nosuch", "0x22", "t1", "0x33"), Collections.emptyList()),
+                "Unknown register: nosuch", "unknown register in the middle");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("t0", "0x11", "t1", "0x100000000"), Collections.emptyList()),
+                "Value for t1 does not fit in 4 bytes: 0x100000000", "register value too wide");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("t0", "0x11", "t1", "eleven"), Collections.emptyList()),
+                "Invalid value for t1: eleven", "register value not a number");
+        require(register(simulator, "t0") == 0 && register(simulator, "t1") == 0, "rejected registers are not written");
+
+        requireThrows(AddressErrorException.class, () -> simulator.modify(none, Arrays.asList(
+                write("0x10010000", 4, "0x55"), write("0x7", 4, "0x66"), write("0x10010004", 4, "0x77"))),
+                "Store address not aligned to word boundary 0x00000007", "misaligned word in the middle");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(none, Arrays.asList(
+                write("0x10010000", 4, "0x55"), write("0x10010004", 3, "0x66"))), "Width must be 1, 2, 4, or 8", "bad width");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(none, Arrays.asList(
+                write("0x10010000", 4, "0x55"), write("0x10010004", 1, "0x1ff"))), "Value for 0x10010004 does not fit in 1 byte: 0x1ff", "memory value too wide");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(none, Arrays.asList(
+                write("0x10010000", 4, "0x55"), write("0x100000000", 4, "0x66"))), "Address out of range: 0x100000000", "address beyond 32 bits");
+        // RARS stores the high word of 8 bytes first; here only the high word is in the data segment.
+        requireThrows(AddressErrorException.class, () -> simulator.modify(none, Arrays.asList(write("0x0ffffffc", 8, "-1"))),
+                "address out of range 0x0ffffffc", "8 bytes across the start of the data segment");
+        requireThrows(AddressErrorException.class, () -> simulator.modify(registers("t0", "0x11"), Arrays.asList(write("0x00400000", 4, "0"))),
+                "Cannot write directly to text segment!0x00400000", "registers with a rejected memory write");
+        require(memory(simulator, 0x10010000) == 0 && memory(simulator, 0x10010004) == 0 && memory(simulator, 0x10000000) == 0, "rejected memory is not written");
+        require(register(simulator, "t0") == 0, "registers are not written when memory is rejected");
+
+        simulator.modify(registers("t0", "0x11", "t1", "-1", "pc", "0x00400008"), Arrays.asList(write("0x10010000", 4, "0x55"), write("0x10010004", 2, "-2")));
+        require(register(simulator, "t0") == 0x11 && register(simulator, "t1") == 0xffffffffL && register(simulator, "pc") == 0x00400008, "registers written");
+        require(memory(simulator, 0x10010000) == 0x55 && memory(simulator, 0x10010004) == 0xfffe, "memory written");
+    }
+
+    // modify refuses a store exactly when RARS would, with RARS's message, so the check can run before any write.
+    // 8 bytes also need a word boundary, as RARS needs to read them back.
+    private static void storeChecks() throws Exception {
+        RarsSimulator simulator = new RarsSimulator();
+        simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
+        int[] addresses = { 0x10010000, 0x10010001, 0x10010002, 0x10010003, 0x10000000, 0x0ffffffc, 0x0ffffff8, 0x00400000, 0x00400002,
+                0x003ffffc, 0x103ffffc, 0x10400000, 0x7ffffffc, 0x7ffffff8, 0x7ffffffe, 0x7fbffffc, 0x7fc00000, 0x80000000, 0xffff0000,
+                0xfffffffc, 0xfffffffe, 0x00000000 };
+        boolean selfModifying = Globals.getSettings().getBooleanSetting(Settings.Bool.SELF_MODIFYING_CODE_ENABLED);
+        try {
+            for (boolean setting : new boolean[] { false, true }) {
+                Globals.getSettings().setBooleanSettingNonPersistent(Settings.Bool.SELF_MODIFYING_CODE_ENABLED, setting);
+                for (int address : addresses) for (int width : new int[] { 1, 2, 4, 8 }) {
+                    String at = String.format("0x%08x", address);
+                    String checked = failure(() -> simulator.modify(Collections.emptyMap(), Arrays.asList(write(at, width, "0"))));
+                    String written = failure(() -> simulator.writeMemory(address, width, 0));
+                    String expected = width == 8 && address % 4 != 0 ? "Store address not aligned to word boundary " + at : written;
+                    require(Objects.equals(checked, expected), "store of " + width + " at " + at + (setting ? " with self-modifying code" : "")
+                            + ": modify gave " + checked + ", RARS gave " + written);
+                }
+            }
+        } finally {
+            Globals.getSettings().setBooleanSettingNonPersistent(Settings.Bool.SELF_MODIFYING_CODE_ENABLED, selfModifying);
+        }
+    }
+
+    private static String failure(Action action) {
+        try {
+            action.run();
+            return null;
+        } catch (Exception error) {
+            return error.getMessage();
+        }
+    }
+
+    private static Map<String, Object> registers(Object... namesAndValues) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (int index = 0; index < namesAndValues.length; index += 2) result.put((String) namesAndValues[index], namesAndValues[index + 1]);
+        return result;
+    }
+
+    private static Map<String, Object> write(String address, int width, String value) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("address", address);
+        result.put("width", (long) width);
+        result.put("value", value);
+        return result;
+    }
+
+    private static long register(RarsSimulator simulator, String name) {
+        return ((Number) simulator.readRegister(name)).longValue();
+    }
+
+    private static long memory(RarsSimulator simulator, int address) throws Exception {
+        return ((Number) simulator.readMemory(address, 4)).longValue();
     }
 
     private static void encode() throws Exception {
