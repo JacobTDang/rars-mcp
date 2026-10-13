@@ -146,6 +146,61 @@ describe('HeadlessSession after startup', () => {
     await expect(session.inspect({})).rejects.toBe(await failure);
     await expectStopped(await recordedPids(directory));
   }, 15_000);
+
+  it('fails waiting and later requests at once with the exit code when the bridge exits', async () => {
+    const { executable } = await fakeBridge('exit');
+    const session = await startBridge(executable, 60_000);
+    const started = Date.now();
+
+    await expect(session.command({ action: 'step' })).rejects.toMatchObject({
+      code: 'BRIDGE_EXITED', message: 'RARS bridge exited with code 3', details: { exitCode: 3, signal: null },
+    });
+    await expect(session.inspect({})).rejects.toMatchObject({ code: 'BRIDGE_EXITED', message: 'RARS bridge exited with code 3' });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 15_000);
+
+  it('notices a bridge killed while the session waits for a request', async () => {
+    const { executable, directory } = await fakeBridge('answer');
+    const session = await startBridge(executable, 60_000);
+    const failure = new Promise<Error>((resolve) => session.onFailure(resolve));
+
+    process.kill((await recordedPids(directory))[0]!, 'SIGKILL');
+
+    await expect(failure).resolves.toMatchObject({
+      code: 'BRIDGE_EXITED', message: 'RARS bridge exited on signal SIGKILL', details: { exitCode: null, signal: 'SIGKILL' },
+    });
+    const started = Date.now();
+    await expect(session.command({ action: 'step' })).rejects.toBe(await failure);
+    expect(Date.now() - started).toBeLessThan(100);
+  }, 15_000);
+
+  it('pauses a request that timed out, so the session takes the next one', async () => {
+    const { executable } = await fakeBridge('pausable');
+    const session = await startBridge(executable, 1_000);
+
+    await expect(session.command({ action: 'continue', maxSteps: 2_147_483_647 })).rejects.toMatchObject({
+      code: 'BRIDGE_TIMEOUT',
+      message: 'RARS bridge request timed out after 1000 ms: continue. A pause was sent, so the session can take further requests.',
+    });
+    // The fake's continue printed this; its reply came after the timeout, so the next reply has it.
+    await expect(session.inspect({})).resolves.toMatchObject({ status: 'paused', stdout: 'output of the run\n' });
+    await expect(session.command({ action: 'step' })).resolves.toMatchObject({ stopReason: 'step', stdout: '' });
+    await session.close();
+  }, 15_000);
+
+  it('fails the session and stops the bridge when it does not answer the pause either', async () => {
+    const { executable, directory } = await fakeBridge('stuck');
+    const session = await startBridge(executable, 1_000);
+    const failure = new Promise<Error>((resolve) => session.onFailure(resolve));
+
+    await expect(session.command({ action: 'continue' })).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
+
+    await expect(failure).resolves.toMatchObject({
+      code: 'BRIDGE_TIMEOUT', message: 'RARS bridge stopped answering: a request and the pause sent after it both timed out after 1000 ms',
+    });
+    await expect(session.inspect({})).rejects.toBe(await failure);
+    await expectStopped(await recordedPids(directory));
+  }, 15_000);
 });
 
 describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
@@ -251,6 +306,60 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     expect(await session.command({ action: 'continue', maxSteps: 50 })).toMatchObject({ status: 'paused', stopReason: 'step_limit' });
     await session.close();
   });
+
+  it('stops a running continue when it is paused', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/infinite.asm')], timeoutMs: 5_000, maxOutputBytes: 65_536,
+    });
+
+    const running = session.command({ action: 'continue', maxSteps: 2_147_483_647 });
+    await new Promise((done) => setTimeout(done, 300));
+    const pausedAt = Date.now();
+    const paused = await session.command({ action: 'pause' });
+
+    await expect(running).resolves.toMatchObject({ status: 'paused', stopReason: 'paused' });
+    expect(paused).toMatchObject({ status: 'paused', stopReason: 'paused' });
+    expect(Date.now() - pausedAt).toBeLessThan(2_000);
+    expect(await session.command({ action: 'continue', maxSteps: 50 })).toMatchObject({ stopReason: 'step_limit' });
+    await session.close();
+  }, 15_000);
+
+  it('pauses a continue that timed out, so the session takes the next request', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/infinite.asm')], timeoutMs: 2_000, maxOutputBytes: 65_536,
+    });
+
+    await expect(session.command({ action: 'continue', maxSteps: 2_147_483_647 }))
+      .rejects.toThrow('RARS bridge request timed out after 2000 ms: continue');
+    expect(await session.inspect({})).toMatchObject({ status: 'paused', stopReason: 'paused' });
+    expect(await session.command({ action: 'step' })).toMatchObject({ status: 'paused', stopReason: 'step' });
+    await session.close();
+  }, 15_000);
+
+  it('hands over the output of a timed-out continue in the next reply, unless that is a reset', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rars-late-output-'));
+    await writeFile(join(directory, 'print.asm'),
+      '.data\nmessage: .asciz "hello\\n"\n.text\nmain:\n  la a0, message\n  li a7, 4\n  ecall\nloop:\n  j loop\n');
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [join(directory, 'print.asm')], timeoutMs: 2_000, maxOutputBytes: 65_536,
+    });
+    const runForever = () => session.command({ action: 'continue', maxSteps: 2_147_483_647 });
+
+    await expect(runForever()).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
+    expect(await session.inspect({})).toMatchObject({ stopReason: 'paused', stdout: 'hello\n', stdoutBytes: 6 });
+    expect(await session.inspect({})).toMatchObject({ stdout: '', stdoutBytes: 6 });
+
+    expect(await session.command({ action: 'reset' })).toMatchObject({ stdout: '', stdoutBytes: 0 });
+    await expect(runForever()).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
+    expect(await session.command({ action: 'reset' })).toMatchObject({ stdout: '', stdoutBytes: 0 });
+    await session.close();
+  }, 20_000);
 
   it('sets breakpoints by label and by file:line', async () => {
     const session = await HeadlessSession.create({

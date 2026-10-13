@@ -135,4 +135,26 @@ describe('SessionStore', () => {
     await Promise.all([first, second]);
     expect(order).toEqual(['first-start', 'first-end', 'second']);
   });
+
+  it('passes a pause on while an earlier command is still running, so it can stop that command', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const target = backend('running');
+    target.command = async (command) => {
+      order.push(command.action);
+      if (command.action === 'continue') await gate;
+      return { status: 'paused' };
+    };
+    const store = new SessionStore();
+    const session = store.get(store.add(target));
+
+    const running = session.command({ action: 'continue' });
+    await Promise.resolve();
+    await session.command({ action: 'pause' });
+
+    expect(order).toEqual(['continue', 'pause']);
+    release();
+    await running;
+  });
 });

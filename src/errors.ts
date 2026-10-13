@@ -9,7 +9,9 @@ export type RarsErrorCode =
   | 'SESSION_FAILED'
   | 'BRIDGE_START_TIMEOUT'
   | 'BRIDGE_START_FAILED'
+  | 'BRIDGE_EXITED'
   | 'BRIDGE_DISCONNECTED'
+  | 'BRIDGE_TIMEOUT'
   | 'BRIDGE_PROTOCOL_ERROR';
 
 export class RarsError extends Error {

@@ -52,8 +52,7 @@ export function watchStartup(child: ChildProcess, timeoutMs: number): BridgeStar
   const onError = (error: Error) => fail(error);
   // close, not exit: it comes once the output is read to the end.
   const onClose = (exitCode: number | null, signal: NodeJS.Signals | null) => fail(new RarsError(
-    'BRIDGE_START_FAILED',
-    `RARS bridge exited during startup ${exitCode === null ? `on signal ${signal}` : `with code ${exitCode}`}\n${report()}`,
+    'BRIDGE_START_FAILED', `RARS bridge exited during startup ${describeExit(exitCode, signal)}\n${report()}`,
     { exitCode, signal, ...output() },
   ));
   child.once('error', onError);
@@ -86,6 +85,11 @@ export function watchStartup(child: ChildProcess, timeoutMs: number): BridgeStar
       await stopBridge(child);
     },
   };
+}
+
+// "with code 3" or "on signal SIGKILL".
+export function describeExit(exitCode: number | null, signal: NodeJS.Signals | null): string {
+  return exitCode === null ? `on signal ${signal}` : `with code ${exitCode}`;
 }
 
 // Kills the bridge and everything it started, and waits for the bridge to exit.

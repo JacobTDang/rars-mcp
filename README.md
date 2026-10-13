@@ -147,9 +147,16 @@ that keeps the run's results, names the dump and quotes RARS's reason.
   - A breakpoint `address` may be a number, a code label such as `EXIT`, or a source location
     such as `prob1a.s:17`.
   - `continue` takes an optional `maxSteps` (1,000,000 by default, at most 2147483647).
-  - Every step and continue reports why it stopped: `step`, `breakpoint`, `step_limit`, `exited`,
-    `ran_off_end`, `exception` or `terminated`. A program that has terminated refuses to run
-    until the session is reset.
+  - `pause` stops a `continue` that is still running; the `continue` then returns with
+    `stopReason: "paused"`.
+  - Every step and continue reports why it stopped: `step`, `breakpoint`, `step_limit`, `paused`,
+    `exited`, `ran_off_end`, `exception` or `terminated`. A program that has terminated refuses to
+    run until the session is reset.
+  - A request with no reply within `RARS_EXECUTION_TIMEOUT_MS` fails with `BRIDGE_TIMEOUT`, and the
+    session is sent a pause: a `continue` that timed out stops where it got to, and the session takes
+    the next request. The output the timed-out request wrote comes in the next reply, unless that
+    reply is to a `reset`. A bridge that does not answer that pause within the same limit either is
+    killed, and the session fails.
   - `reset` starts the program again with no backstep history, so `backstep` cannot return to the
     previous run. With nothing to undo, `backstep` fails with `No backstep history`.
   - Every reply from `rars_debug_command`, `rars_inspect` and `rars_modify` has in `stdout` and
@@ -191,9 +198,9 @@ that keeps the run's results, names the dump and quotes RARS's reason.
   (`zero`) is hard-wired to zero, so a write to it is refused.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
   `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`. A session whose bridge
-  connection fails is removed from the list at once; its waiting requests fail with the reason,
-  and later requests on its ID fail with `SESSION_FAILED` and the same reason. Other sessions are
-  not affected.
+  exits (`BRIDGE_EXITED`, with its exit code or signal) or whose connection fails is removed from
+  the list at once; its waiting requests fail with the reason, and later requests on its ID fail
+  with `SESSION_FAILED` and the same reason. Other sessions are not affected.
 
 ### The visible desktop session
 
@@ -353,7 +360,7 @@ directory. Call `rars_live_connect`, then use its session ID with `rars_live_com
 | `RARS_BRIDGE_JAR` | `java/bridge/build/rars-mcp-bridge.jar` | The Java bridge used by debugger sessions |
 | `RARS_BRIDGE_HOST` | `127.0.0.1` | Host of the visible desktop session |
 | `RARS_LIVE_DISCOVERY_DIR` | `.runtime` | Where the launcher writes its port and token |
-| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, and for starting the Java bridge; at most 2147483647 |
+| `RARS_EXECUTION_TIMEOUT_MS` | `10000` | Wall-clock limit for one run, for starting the Java bridge, and for each debug request; at most 2147483647 |
 | `RARS_MAX_OUTPUT_BYTES` | `1048576` | Output captured per run, in `rars_run` and in a debugger session |
 | `RARS_MAX_INSPECTION_BYTES` | `65536` | Limit on one inspection |
 | `RARS_SESSION_IDLE_MS` | `1800000` | Idle time before a debugger session closes; at most 2147483647 |

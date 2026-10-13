@@ -7,6 +7,7 @@ import dev.rarsmcp.sim.RarsSimulator;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
@@ -18,6 +19,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 public final class BridgeServer {
     private final String token;
@@ -40,50 +45,112 @@ public final class BridgeServer {
 
     // maxOutputBytes: the most program output, stdout and stderr together, kept from one run.
     public static void run(String token, int port, String mode, BridgeHooks hooks, long maxOutputBytes) throws Exception {
-        BridgeServer bridge = new BridgeServer(token, mode, hooks, maxOutputBytes);
         try (ServerSocket server = new ServerSocket(port, 16, InetAddress.getLoopbackAddress())) {
             System.err.println("RARS_MCP_PORT=" + server.getLocalPort());
             System.err.flush();
-            while (true) bridge.serve(server.accept());
+            serveClients(server, token, mode, hooks, maxOutputBytes);
         }
     }
 
-    private void serve(Socket socket) {
-        try (Socket connection = socket;
-             BufferedReader input = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
-             BufferedWriter output = new BufferedWriter(new OutputStreamWriter(connection.getOutputStream(), StandardCharsets.UTF_8))) {
-            boolean authenticated = false;
+    // Serves one client at a time until the server socket is closed.
+    static void serveClients(ServerSocket server, String token, String mode, BridgeHooks hooks, long maxOutputBytes) throws Exception {
+        BridgeServer bridge = new BridgeServer(token, mode, hooks, maxOutputBytes);
+        while (true) bridge.serve(server.accept());
+    }
+
+    // This thread reads the client's requests and a worker thread answers them, one at a time and
+    // in order. Each request is numbered as it is read, and a pause stops every continue read
+    // before it, so a pause reaches a continue that is still running.
+    private void serve(Socket socket) throws InterruptedException {
+        ExecutorService worker = Executors.newSingleThreadExecutor((task) -> new Thread(task, "rars-bridge-worker"));
+        try (Socket connection = socket) {
+            Client client = new Client(new BufferedWriter(new OutputStreamWriter(connection.getOutputStream(), StandardCharsets.UTF_8)));
+            try {
+                client.read(new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)), worker);
+            } finally {
+                // What the client left running stops and what it left queued is dropped, so the
+                // next client finds the simulator free.
+                client.leave();
+            }
+        } catch (IOException ignored) {
+            // A disconnected client ends only its connection; the bridge remains available.
+        } finally {
+            worker.shutdown();
+            worker.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+        }
+    }
+
+    // One connection. Only the reader thread writes pausedBefore and gone; only the worker thread
+    // authenticates and writes replies.
+    private final class Client {
+        private final BufferedWriter output;
+        // Requests numbered below this are paused.
+        private volatile long pausedBefore;
+        private volatile boolean gone;
+        private boolean authenticated;
+
+        Client(BufferedWriter output) { this.output = output; }
+
+        void read(BufferedReader input, ExecutorService worker) throws IOException {
+            long count = 0;
             String line;
             while ((line = input.readLine()) != null) {
-                String id = "unknown";
-                String response;
+                long number = ++count;
+                BridgeRequest request;
                 try {
-                    BridgeRequest request = BridgeRequest.fromJson(line);
-                    id = request.id;
-                    if (!authenticated) {
-                        if (!request.command.equals("hello") || !token.equals(string(request.payload.get("token")))) {
-                            response = BridgeResponse.error(id, "AUTHENTICATION_FAILED", "Invalid bridge token");
-                        } else {
-                            authenticated = true;
-                            response = BridgeResponse.success(id, mapOf("protocolVersion", 1, "mode", mode));
-                        }
-                    } else {
-                        response = dispatch(request);
-                    }
+                    request = BridgeRequest.fromJson(line);
                 } catch (Exception error) {
-                    response = BridgeResponse.error(id, "BRIDGE_ERROR", error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+                    worker.execute(() -> send(failure("unknown", error)));
+                    continue;
                 }
+                if (request.command.equals("command") && "pause".equals(string(request.payload.get("action")))) pausedBefore = number;
+                worker.execute(() -> answer(request, number));
+            }
+        }
+
+        void answer(BridgeRequest request, long number) {
+            if (gone) return;
+            String response;
+            try {
+                if (!authenticated) {
+                    if (!request.command.equals("hello") || !token.equals(string(request.payload.get("token")))) {
+                        response = BridgeResponse.error(request.id, "AUTHENTICATION_FAILED", "Invalid bridge token");
+                    } else {
+                        authenticated = true;
+                        response = BridgeResponse.success(request.id, mapOf("protocolVersion", 1, "mode", mode));
+                    }
+                } else {
+                    response = dispatch(request, () -> number < pausedBefore);
+                }
+            } catch (Exception error) {
+                response = failure(request.id, error);
+            }
+            send(response);
+        }
+
+        void send(String response) {
+            if (gone) return;
+            try {
                 output.write(response);
                 output.newLine();
                 output.flush();
+            } catch (IOException disconnected) {
+                // The reader thread sees the same disconnection and ends the connection.
             }
-        } catch (Exception ignored) {
-            // A disconnected client ends only its connection; the bridge remains available.
+        }
+
+        void leave() {
+            gone = true;
+            pausedBefore = Long.MAX_VALUE;
         }
     }
 
+    private static String failure(String id, Exception error) {
+        return BridgeResponse.error(id, "BRIDGE_ERROR", error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+    }
+
     @SuppressWarnings("unchecked")
-    private String dispatch(BridgeRequest request) throws Exception {
+    private String dispatch(BridgeRequest request, BooleanSupplier pauseRequested) throws Exception {
         Map<String, Object> payload = request.payload;
         switch (request.command) {
             case "load":
@@ -95,7 +162,7 @@ public final class BridgeServer {
             case "assemble":
                 return BridgeResponse.success(request.id, simulator.snapshot());
             case "command":
-                Map<String, Object> commandResult = command(payload);
+                Map<String, Object> commandResult = command(payload, pauseRequested);
                 hooks.afterMutation();
                 return BridgeResponse.success(request.id, commandResult);
             case "inspect": {
@@ -143,13 +210,15 @@ public final class BridgeServer {
         }
     }
 
-    private Map<String, Object> command(Map<String, Object> payload) throws Exception {
+    private Map<String, Object> command(Map<String, Object> payload, BooleanSupplier pauseRequested) throws Exception {
         String action = string(payload.get("action"));
         switch (action) {
             case "step": return simulator.step();
             case "backstep": return simulator.backstep();
-            case "continue": return simulator.runUntilStop(payload.containsKey("maxSteps") ? integer(payload.get("maxSteps")) : 1_000_000);
+            case "continue":
+                return simulator.runUntilStop(payload.containsKey("maxSteps") ? integer(payload.get("maxSteps")) : 1_000_000, pauseRequested);
             case "reset": return simulator.reset();
+            // The pause itself took effect as the request was read; here it reports where the program stopped.
             case "pause": return simulator.snapshot();
             case "breakpoint_add": return simulator.addBreakpoint(string(payload.get("address")));
             case "breakpoint_remove": return simulator.removeBreakpoint(string(payload.get("address")));

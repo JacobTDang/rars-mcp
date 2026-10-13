@@ -23,6 +23,8 @@ class QueuedBackend implements SessionBackend {
   }
 
   command(command: DebugCommand): Promise<MachineState> {
+    // A pause goes straight to the backend, so it can stop a continue that is still running.
+    if (command.action === 'pause') return this.target.command(command);
     return this.enqueue(() => this.target.command(command));
   }
 

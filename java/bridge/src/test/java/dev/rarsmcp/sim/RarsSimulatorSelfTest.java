@@ -16,9 +16,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 public final class RarsSimulatorSelfTest {
     private static final long OUTPUT_LIMIT = 1 << 20;
+    private static final BooleanSupplier NEVER = () -> false;
 
     public static void main(String[] args) throws Exception {
         RarsSimulator simulator = new RarsSimulator(OUTPUT_LIMIT);
@@ -44,7 +47,7 @@ public final class RarsSimulatorSelfTest {
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
         require("step".equals(simulator.step().get("stopReason")), "step reason");
         simulator.addBreakpoint("debug.asm:7");
-        Map<String, Object> atBreakpoint = simulator.runUntilStop(1000);
+        Map<String, Object> atBreakpoint = simulator.runUntilStop(1000, NEVER);
         require("breakpoint".equals(atBreakpoint.get("stopReason")) && pc(atBreakpoint) == initialPc + 8, "breakpoint reason");
         simulator.removeBreakpoint(String.valueOf(initialPc + 8));
         require(((java.util.List<?>) simulator.addBreakpoint("main").get("breakpoints")).contains("0x00400000"), "label breakpoint");
@@ -52,7 +55,7 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("nope"), "Unknown label: nope", "unknown label");
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("value"), "value is a data label, not a code label", "data label");
         requireThrows(IllegalArgumentException.class, () -> simulator.addBreakpoint("debug.asm:2"), "No instruction at debug.asm:2", "line without code");
-        Map<String, Object> exited = simulator.runUntilStop(1000);
+        Map<String, Object> exited = simulator.runUntilStop(1000, NEVER);
         require("exited".equals(exited.get("stopReason")) && "terminated".equals(exited.get("status")), "exit reason");
 
         String terminatedMessage = "The program has terminated; reset the session to run it again";
@@ -63,7 +66,7 @@ public final class RarsSimulatorSelfTest {
         Map<String, Object> terminated = simulator.terminate();
         require("terminated".equals(terminated.get("status")) && "terminated".equals(terminated.get("stopReason")), "terminate");
         requireThrows(IllegalStateException.class, () -> simulator.step(), terminatedMessage, "step after terminate");
-        requireThrows(IllegalStateException.class, () -> simulator.runUntilStop(10), terminatedMessage, "continue after terminate");
+        requireThrows(IllegalStateException.class, () -> simulator.runUntilStop(10, NEVER), terminatedMessage, "continue after terminate");
         require("paused".equals(simulator.backstep().get("status")) && pc(simulator.snapshot()) == initialPc, "backstep after terminate");
         simulator.terminate();
         require("paused".equals(simulator.reset().get("status")), "reset after terminate");
@@ -71,7 +74,7 @@ public final class RarsSimulatorSelfTest {
 
         // A reset starts a new run, so the previous run's history cannot be stepped back into.
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
-        require("exited".equals(simulator.runUntilStop(1000).get("stopReason")), "run to exit before reset");
+        require("exited".equals(simulator.runUntilStop(1000, NEVER).get("stopReason")), "run to exit before reset");
         simulator.reset();
         requireThrows(IllegalStateException.class, () -> simulator.backstep(), "No backstep history", "backstep after reset");
         Map<String, Object> fresh = simulator.snapshot();
@@ -82,14 +85,25 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalStateException.class, () -> simulator.backstep(), "No backstep history", "history ends at the reset");
 
         simulator.load(Arrays.asList("tests/fixtures/infinite.asm"), Collections.emptyList(), "");
-        Map<String, Object> limited = simulator.runUntilStop(100);
+        Map<String, Object> limited = simulator.runUntilStop(100, NEVER);
         require("step_limit".equals(limited.get("stopReason")) && "paused".equals(limited.get("status")), "step limit reason");
 
+        // The pause is checked before each instruction, so it stops a run at any point, even before the first.
+        simulator.load(Arrays.asList("tests/fixtures/infinite.asm"), Collections.emptyList(), "");
+        AtomicInteger checks = new AtomicInteger();
+        Map<String, Object> paused = simulator.runUntilStop(Integer.MAX_VALUE, () -> checks.incrementAndGet() > 25);
+        require("paused".equals(paused.get("stopReason")) && "paused".equals(paused.get("status")), "pause reason");
+        require(checks.get() == 26, "instructions run before the pause: " + (checks.get() - 1));
+        long pausedPc = pc(paused);
+        require("paused".equals(simulator.runUntilStop(Integer.MAX_VALUE, () -> true).get("stopReason")) && pc(simulator.snapshot()) == pausedPc,
+                "pause before the first instruction");
+        require("step_limit".equals(simulator.runUntilStop(10, NEVER).get("stopReason")), "continue after a pause");
+
         simulator.load(Arrays.asList("tests/fixtures/dropoff.asm"), Collections.emptyList(), "");
-        require("ran_off_end".equals(simulator.runUntilStop(1000).get("stopReason")), "ran off end reason");
+        require("ran_off_end".equals(simulator.runUntilStop(1000, NEVER).get("stopReason")), "ran off end reason");
 
         simulator.load(Arrays.asList("tests/fixtures/fault.asm"), Collections.emptyList(), "");
-        Map<String, Object> faulted = simulator.runUntilStop(1000);
+        Map<String, Object> faulted = simulator.runUntilStop(1000, NEVER);
         require("exception".equals(faulted.get("stopReason")) && "terminated".equals(faulted.get("status")), "exception reason");
         require(String.valueOf(faulted.get("exception")).contains("Load address not aligned"), "exception message");
 
@@ -126,7 +140,7 @@ public final class RarsSimulatorSelfTest {
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("0x00400008", "main"), "0x00400008 comes after main", "backwards range");
 
         simulator.load(Arrays.asList("tests/fixtures/debug.asm"), Collections.emptyList(), "");
-        simulator.runUntilStop(1000);
+        simulator.runUntilStop(1000, NEVER);
         require(addresses(simulator.instructionsAround("pc", 10)).equals(program.subList(0, 4)), "window after exit");
         require(addresses(simulator.instructionsAround("pc", 2)).equals(program.subList(2, 4)), "window after exit ends at the last instruction");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsAround("0x00400010", 3), "No instruction at 0x00400010", "address past the end");
@@ -145,7 +159,7 @@ public final class RarsSimulatorSelfTest {
         require(simulator.instructionsBetween("main", "0x0040031c").size() == 200, "range at the limit");
         requireThrows(IllegalArgumentException.class, () -> simulator.instructionsBetween("main", "0x004003e4"),
                 "The range main to 0x004003e4 holds 250 instructions; the limit is 200", "range over the limit");
-        simulator.runUntilStop(1000);
+        simulator.runUntilStop(1000, NEVER);
         List<String> tail = addresses(simulator.instructionsAround("pc", 10));
         require(tail.size() == 10 && tail.get(0).equals("0x004003c0") && tail.get(9).equals("0x004003e4"), "last 10 instructions after running off the end");
         requireThrows(IllegalStateException.class, () -> simulator.encode(Arrays.asList("nop")),
@@ -210,14 +224,14 @@ public final class RarsSimulatorSelfTest {
         simulator.load(Arrays.asList(loop.toString()), Collections.emptyList(), "");
         requireOutput(simulator.snapshot(), "", 0, "", 0, false, "before the program runs");
         // la is two instructions, so the fourth is the first ecall.
-        requireOutput(simulator.runUntilStop(4), line, 17, "", 0, false, "first line");
+        requireOutput(simulator.runUntilStop(4, NEVER), line, 17, "", 0, false, "first line");
         requireOutput(simulator.snapshot(), "", 17, "", 0, false, "nothing new");
         requireOutput(simulator.step(), "", 17, "", 0, false, "the jump prints nothing");
         requireOutput(simulator.step(), line, 34, "", 0, false, "second line only");
-        requireOutput(simulator.runUntilStop(1000), line.substring(0, 6), 40, "", 0, true, "cut at the limit");
-        requireOutput(simulator.runUntilStop(1000), "", 40, "", 0, true, "nothing past the limit");
+        requireOutput(simulator.runUntilStop(1000, NEVER), line.substring(0, 6), 40, "", 0, true, "cut at the limit");
+        requireOutput(simulator.runUntilStop(1000, NEVER), "", 40, "", 0, true, "nothing past the limit");
         requireOutput(simulator.reset(), "", 0, "", 0, false, "reset starts the output again");
-        requireOutput(simulator.runUntilStop(4), line, 17, "", 0, false, "first line after reset");
+        requireOutput(simulator.runUntilStop(4, NEVER), line, 17, "", 0, false, "first line after reset");
 
         // A write to stderr counts against the same limit.
         Path both = program("rars-stderr",
@@ -225,20 +239,20 @@ public final class RarsSimulatorSelfTest {
                 + "  li a0, 1\n  la a1, out\n  li a2, 10\n  li a7, 64\n  ecall\n"
                 + "  li a0, 2\n  la a1, err\n  li a2, 36\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
         simulator.load(Arrays.asList(both.toString()), Collections.emptyList(), "");
-        requireOutput(simulator.runUntilStop(1000), "0123456789", 10, "abcdefghijklmnopqrstuvwxyz0123", 30, true, "stderr shares the limit");
+        requireOutput(simulator.runUntilStop(1000, NEVER), "0123456789", 10, "abcdefghijklmnopqrstuvwxyz0123", 30, true, "stderr shares the limit");
 
         // A character written in two parts arrives whole, once its second part is written.
         Path split = program("rars-split-character",
                 ".data\ne: .byte 0xc3, 0xa9\n.text\nmain:\n  li a0, 1\n  la a1, e\n  li a2, 1\n  li a7, 64\n  ecall\n"
                 + "  li a0, 1\n  addi a1, a1, 1\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
         simulator.load(Arrays.asList(split.toString()), Collections.emptyList(), "");
-        requireOutput(simulator.runUntilStop(6), "", 0, "", 0, false, "first part held back");
-        requireOutput(simulator.runUntilStop(1000), "\u00e9", 2, "", 0, false, "second part completes the character");
+        requireOutput(simulator.runUntilStop(6, NEVER), "", 0, "", 0, false, "first part held back");
+        requireOutput(simulator.runUntilStop(1000, NEVER), "\u00e9", 2, "", 0, false, "second part completes the character");
         // A part that can never be completed is not held back once the run has ended.
         Path dangling = program("rars-dangling-character",
                 ".data\ne: .byte 0xc3\n.text\nmain:\n  li a0, 1\n  la a1, e\n  li a2, 1\n  li a7, 64\n  ecall\n  li a7, 10\n  ecall\n");
         simulator.load(Arrays.asList(dangling.toString()), Collections.emptyList(), "");
-        requireOutput(simulator.runUntilStop(1000), "\ufffd", 1, "", 0, false, "incomplete character at exit");
+        requireOutput(simulator.runUntilStop(1000, NEVER), "\ufffd", 1, "", 0, false, "incomplete character at exit");
     }
 
     private static Path program(String name, String source) throws Exception {
