@@ -69,6 +69,27 @@ describe.runIf(process.env.RARS_JAR)('rars_encode with RARS', () => {
     });
   });
 
+  it('gives CSR instructions an unsigned csr field and the csr*i forms a uimm field', async () => {
+    const encode = createEncodeHandler(await dependencies(bridge));
+
+    const result = await encode({ instructions: ['rdcycle t0', 'csrrwi t0, 0x300, 5', 'addi t0, t0, -1024'] });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({
+      instructions: [
+        { source: 'rdcycle t0', basic: ['csrrs x5,0x00000c00,x0'], words: [
+          { hex: '0xc00022f3', format: 'I', fields: { opcode: 0x73, rd: 5, funct3: 2, rs1: 0, csr: 3072 } },
+        ] },
+        { source: 'csrrwi t0, 0x300, 5', basic: ['csrrwi x5,0x00000300,5'], words: [
+          { hex: '0x3002d2f3', format: 'I', fields: { opcode: 0x73, rd: 5, funct3: 5, uimm: 5, csr: 0x300 } },
+        ] },
+        { source: 'addi t0, t0, -1024', basic: [expect.stringMatching(/^addi x5,x5,/)], words: [
+          { hex: '0xc0028293', format: 'I', fields: { opcode: 0x13, rd: 5, funct3: 0, rs1: 5, imm: -1024 } },
+        ] },
+      ],
+    });
+  });
+
   it('fails with every message when no instruction encodes', async () => {
     const encode = createEncodeHandler(await dependencies(bridge));
 

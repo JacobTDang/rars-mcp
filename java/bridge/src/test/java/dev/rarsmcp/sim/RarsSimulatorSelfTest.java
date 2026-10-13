@@ -179,6 +179,21 @@ public final class RarsSimulatorSelfTest {
         requireWord(new RarsSimulator().encode(Arrays.asList("jal x0, -2048")).get(0), 0, "0x801ff06f", "J", "opcode", 0x6f, "rd", 0, "imm", -2048);
         requireError(new RarsSimulator().encode(Arrays.asList("nope x1")).get(0), "\"nope\" is not a recognized operator");
 
+        // The CSR number is unsigned, so cycle is 0xc00 where addi reads the same bits as -1024. The csr*i
+        // forms keep a 5-bit unsigned immediate where rs1 would be.
+        List<Map<String, Object>> csr = new RarsSimulator().encode(Arrays.asList(
+                "rdcycle t0", "rdinstreth a0", "csrw t1, fcsr", "csrrc t1, 0x800, t2", "csrrwi t0, 0x300, 5", "csrsi uie, 8",
+                "csrrci t0, 0xfff, 31", "addi t0, t0, -1024", "wfi"));
+        requireWord(csr.get(0), 0, "0xc00022f3", "I", "opcode", 0x73, "rd", 5, "funct3", 2, "rs1", 0, "csr", 0xc00);
+        requireWord(csr.get(1), 0, "0xc8202573", "I", "opcode", 0x73, "rd", 10, "funct3", 2, "rs1", 0, "csr", 0xc82);
+        requireWord(csr.get(2), 0, "0x00331073", "I", "opcode", 0x73, "rd", 0, "funct3", 1, "rs1", 6, "csr", 3);
+        requireWord(csr.get(3), 0, "0x8003b373", "I", "opcode", 0x73, "rd", 6, "funct3", 3, "rs1", 7, "csr", 0x800);
+        requireWord(csr.get(4), 0, "0x3002d2f3", "I", "opcode", 0x73, "rd", 5, "funct3", 5, "uimm", 5, "csr", 0x300);
+        requireWord(csr.get(5), 0, "0x00446073", "I", "opcode", 0x73, "rd", 0, "funct3", 6, "uimm", 8, "csr", 4);
+        requireWord(csr.get(6), 0, "0xfffff2f3", "I", "opcode", 0x73, "rd", 5, "funct3", 7, "uimm", 31, "csr", 0xfff);
+        requireWord(csr.get(7), 0, "0xc0028293", "I", "opcode", 0x13, "rd", 5, "funct3", 0, "rs1", 5, "imm", -1024);
+        requireWord(csr.get(8), 0, "0x10500073", "I", "opcode", 0x73, "rd", 0, "funct3", 0, "rs1", 0, "imm", 0x105);
+
         String countMessage = "Between 1 and 200 instructions are needed";
         requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.emptyList()), countMessage, "no instructions");
         requireThrows(IllegalArgumentException.class, () -> new RarsSimulator().encode(Collections.nCopies(201, "nop")), countMessage, "too many instructions");
