@@ -217,11 +217,29 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
     expect(result.isError).toBe(true);
     expect(result.content).toEqual([{
       type: 'text',
-      text: 'Execution failed\nProgram terminated by calling exit\n'
-        + 'This segment has not been written to, there is nothing to dump.\n'
-        + 'RARS wrote no file for dump[0] (0x10040000-0x10040008)',
+      text: 'Execution completed, but RARS wrote no file for dump[0] (0x10040000-0x10040008)\n'
+        + 'Program terminated by calling exit\nThis segment has not been written to, there is nothing to dump.',
     }]);
     expect(result.structuredContent).not.toHaveProperty('dumps.0.text');
+  });
+
+  it('keeps the run result when RARS refuses a dump range', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\nvalues: .word 1, 2, 3\n.text\nmain:\n  li a0, 42\n  li a7, 1\n  ecall\n  li a7, 10\n  ecall\n');
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({ files: ['prog.s'], dump: [{ segment: '0x10010008-0x10010000', format: 'HexText' }] });
+
+    expect(result).toMatchObject({ isError: true, structuredContent: { exitCode: 0, stdout: '42' } });
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution completed, but RARS wrote no file for dump[0] (0x10010008-0x10010000)\n'
+        + 'Program terminated by calling exit\n'
+        + 'Error while attempting to save dump, segment/address-range 0x10010008-0x10010000 is invalid!',
+    }]);
   });
 
   it('still reads the count and registers when RARS writes no inline dump', async () => {
@@ -242,9 +260,8 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
     });
     expect(result.content).toEqual([{
       type: 'text',
-      text: 'Execution failed\nProgram terminated by calling exit\n'
-        + 'This segment has not been written to, there is nothing to dump.\n'
-        + 'RARS wrote no file for dump[0] (0x10040000-0x10040008)',
+      text: 'Execution completed, but RARS wrote no file for dump[0] (0x10040000-0x10040008)\n'
+        + 'Program terminated by calling exit\nThis segment has not been written to, there is nothing to dump.',
     }]);
   });
 
@@ -548,11 +565,26 @@ describe('headless tool handlers', () => {
     expect(result).toMatchObject({ isError: true, structuredContent: { dumps: [{ segment: '.data', format: 'HexText' }] } });
     expect(result.content).toEqual([{
       type: 'text',
-      text: 'Execution failed\nProgram terminated by calling exit\n'
-        + 'Error while attempting to save dump, file dump[0] was not found!\n'
-        + 'RARS wrote no file for dump[0] (.data)',
+      text: 'Execution completed, but RARS wrote no file for dump[0] (.data)\n'
+        + 'Program terminated by calling exit\nError while attempting to save dump, file dump[0] was not found!',
     }]);
     expect(JSON.stringify(result)).not.toMatch(/ENOENT|rars-dumps-/);
+  });
+
+  it.each<[{ address: string; words: number }, string]>([
+    [{ address: '0xfffffffc', words: 2 }, 'dump range 0xfffffffc-0x100000004 ends past 0xffffffff'],
+    [{ address: '0xfffffffc', words: 1 }, 'dump range 0xfffffffc-0x100000000 ends past 0xffffffff'],
+  ])('rejects the dump %j before running RARS', async (segment, message) => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await writeFile(join(root, 'prog.s'), '.data\n.word 1\n');
+    const run = vi.fn();
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run,
+      javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    await expect(handlers.run({ files: ['prog.s'], dump: [{ segment, format: 'HexText' }] })).rejects.toThrow(message);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('lists and closes sessions', async () => {
@@ -631,8 +663,18 @@ describe('dump schema', () => {
       .toEqual(addresses.map((address) => `dump address ${address} is not word aligned`));
   });
 
+  it.each<[unknown, string]>([
+    [{ address: '0x100000000', words: 1 }, '0x100000000'],
+    ['0xfffffff0-0x100000000', '0x100000000'],
+  ])('rejects the segment %j past 32 bits', (segment, address) => {
+    const result = dumpSchema.safeParse({ segment, format: 'HexText' });
+
+    expect(result.error?.issues.map(({ message }) => message)).toEqual([`dump address ${address} is past 0xffffffff`]);
+  });
+
   it.each<unknown>([
     { address: '0x10010004', words: 1 }, { address: '0x1001000C', words: 1 }, '0x10010000-0x1001000c', '.data',
+    '0xfffffff8-0xfffffffc',
   ])('accepts the word-aligned segment %j', (segment) => {
     expect(dumpSchema.safeParse({ segment, format: 'HexText' }).success).toBe(true);
   });

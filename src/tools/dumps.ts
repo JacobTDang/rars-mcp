@@ -70,5 +70,8 @@ export function addressRange(address: string, words: number): string {
   const low = BigInt(address);
   // RARS's dump CLI treats the upper address as exclusive, despite displaying ranges as lo-hi.
   const high = low + BigInt(words) * 4n;
-  return `0x${low.toString(16)}-0x${high.toString(16)}`;
+  const range = `0x${low.toString(16)}-0x${high.toString(16)}`;
+  // RARS takes 32-bit bounds, so it refuses an end past 0xffffffff and writes no file.
+  if (high > 0xffffffffn) throw new Error(`dump range ${range} ends past 0xffffffff`);
+  return range;
 }
