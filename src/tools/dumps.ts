@@ -15,6 +15,8 @@ export interface PreparedDumps {
   unwritten(): Promise<string[]>;
   // Replaces each temporary dump path with dump[index], the dump's place in the request.
   remapText(text: string): string;
+  // Each dump's segment and format, with the workspace file or, when inlineContents is set, the contents
+  // of each inline dump RARS wrote.
   read(inlineContents?: boolean): Promise<Array<Record<string, unknown>>>;
   cleanup(): Promise<void>;
 }
@@ -36,34 +38,39 @@ export async function prepareDumps(
     // The .out ending keeps the path of dump-1 from matching inside dump-10 in remapText.
     file: workspaceFiles[index] ?? join(directory!, `dump-${index}.out`),
   }));
+  const written = () => Promise.all(cli.map(({ file }) => access(file).then(() => true, (error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  })));
   return {
     cli,
     unwritten: async () => {
-      const written = await Promise.all(cli.map(({ file }) => access(file).then(() => true, (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return false;
-        throw error;
-      })));
-      return cli.flatMap(({ segment }, index) => written[index] ? [] : [`dump[${index}] (${segment})`]);
+      const wrote = await written();
+      return cli.flatMap(({ segment }, index) => wrote[index] ? [] : [`dump[${index}] (${segment})`]);
     },
     remapText: (text) => cli.reduce(
       (mapped, { file }, index) => workspaceFiles[index] === undefined ? mapped.replaceAll(file, `dump[${index}]`) : mapped,
       text,
     ),
-    read: async (inlineContents = true) => Promise.all(dumps.map(async ({ input }, index) => {
-      const file = workspaceFiles[index];
-      if (file !== undefined) return { segment: input.segment, format: input.format, file };
-      if (!inlineContents) return { segment: input.segment, format: input.format };
-      const contents = await readFile(cli[index]!.file);
-      if (!textFormats.has(input.format)) {
-        return { segment: input.segment, format: input.format, bytesBase64: contents.toString('base64') };
-      }
-      const text = contents.toString('utf8');
-      if (input.format !== 'HexText') return { segment: input.segment, format: input.format, text };
-      const words = text.split(/\r?\n/).filter(Boolean).map((word) => `0x${word.trim().replace(/^0x/i, '')}`);
-      return { segment: input.segment, format: input.format, text, words };
-    })),
+    read: async (inlineContents = true) => {
+      const wrote = inlineContents ? await written() : [];
+      return Promise.all(dumps.map(async ({ input }, index) => {
+        const file = workspaceFiles[index];
+        if (file !== undefined) return { segment: input.segment, format: input.format, file };
+        if (!wrote[index]) return { segment: input.segment, format: input.format };
+        return { segment: input.segment, format: input.format, ...dumpContents(input.format, await readFile(cli[index]!.file)) };
+      }));
+    },
     cleanup: () => directory === undefined ? Promise.resolve() : rm(directory, { recursive: true, force: true }),
   };
+}
+
+// Text formats as text, HexText also as 0x words, and binary formats as base64.
+function dumpContents(format: DumpInput['format'], contents: Buffer): Record<string, unknown> {
+  if (!textFormats.has(format)) return { bytesBase64: contents.toString('base64') };
+  const text = contents.toString('utf8');
+  if (format !== 'HexText') return { text };
+  return { text, words: text.split(/\r?\n/).filter(Boolean).map((word) => `0x${word.trim().replace(/^0x/i, '')}`) };
 }
 
 export function addressRange(address: string, words: number): string {
