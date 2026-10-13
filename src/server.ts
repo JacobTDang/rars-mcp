@@ -71,7 +71,7 @@ export function createMcpServer(dependencies: ToolDependencies): McpServer {
     description: 'Load, inspect, modify, or drive the visible RARS desktop session. This mutates the open GUI.', inputSchema: liveCommandSchema,
   }, handlers.liveCommand);
   server.registerTool('wave_query', {
-    description: 'Read signal values at given times from a VCD waveform file in the workspace.', inputSchema: waveQuerySchema,
+    description: 'Read signal values at given times from a VCD or FST waveform file in the workspace.', inputSchema: waveQuerySchema,
   }, createWaveQuery(dependencies));
   server.registerTool('do_file_check', {
     description: 'Dry-run a Questa or ModelSim .do script with stubbed commands: what it compiles, in what order, and which files are missing.',

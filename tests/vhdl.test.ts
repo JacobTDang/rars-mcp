@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, realpath } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,15 +17,16 @@ import { Workspace } from '../src/workspace.js';
 
 const simulator = process.env.VHDL_SIMULATOR ?? 'nvc';
 const fixtures = resolve('tests/fixtures/vhdl');
+const waveFixtures = resolve('tests/fixtures/wave');
 
 function simulatorAvailable(): boolean {
   const result = spawnSync(simulator, ['--version'], { stdio: 'ignore' });
   return result.error === undefined && result.status === 0;
 }
 
-async function workspaceWith(files: string[]) {
+async function workspaceWith(files: string[], from = fixtures) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'vhdl-tools-')));
-  await Promise.all(files.map((file) => copyFile(join(fixtures, file), join(root, file))));
+  await Promise.all(files.map((file) => copyFile(join(from, file), join(root, file))));
   return root;
 }
 
@@ -420,16 +421,31 @@ describe.runIf(simulatorAvailable())('VHDL tools with nvc', () => {
     });
   });
 
-  it('writes an FST wave file when asked', async () => {
-    const root = await workspaceWith(['half_adder.vhd', 'half_adder_tb.vhd']);
+  it('writes an FST wave file that wave_query reads the same as the VCD of the same run', async () => {
+    const root = await workspaceWith(['alu.vhd', 'tb_alu.vhd'], waveFixtures);
     const handlers = await handlersFor(root);
+    const run = (file: string) => handlers.run({ testbench: 'tb_alu', files: ['alu.vhd', 'tb_alu.vhd'], wave: { file } });
 
-    const result = await handlers.run({
-      testbench: 'half_adder_tb', files: ['half_adder.vhd', 'half_adder_tb.vhd'], wave: { file: 'adder.fst' },
+    expect((await run('alu.fst')).structuredContent).toMatchObject({ ok: true, wave: { file: join(root, 'alu.fst'), format: 'fst' } });
+    expect((await run('alu.vcd')).structuredContent).toMatchObject({ ok: true, wave: { file: join(root, 'alu.vcd'), format: 'vcd' } });
+    const query = createWaveQuery({ workspace: await Workspace.create(root), waveMaxBytes: 1024 * 1024 });
+    const signals = ['tb_alu.s_a', 'tb_alu/dut/s_sum', 'TB_ALU.S_OVFL', 'tb_alu.s_late', 'tb_alu.s_ratio', 'tb_alu.s_step', 'tb_alu.s_phase'];
+    const times = ['0 ns', '10 ns', '20 ns', '35 ns', '1 us'];
+
+    const fst = await query({ file: 'alu.fst', signals, times });
+
+    expect(fst).toEqual(await query({ file: 'alu.vcd', signals, times }));
+    expect(fst.structuredContent).toMatchObject({
+      startTime: '0 fs',
+      endTime: '40 ns',
+      values: [
+        { time: '0 ns', 'tb_alu.s_a': { hex: '0x3' }, 'tb_alu.s_late': { bits: 'u' }, 'tb_alu.s_phase': { string: 'setup' } },
+        { time: '10 ns', 'tb_alu.dut.s_sum': { signed: -8 }, 'tb_alu.s_ovfl': { bits: '1' }, 'tb_alu.s_ratio': { real: 0.25 } },
+        { time: '20 ns', 'tb_alu.dut.s_sum': { hex: '0x7' }, 'tb_alu.s_late': { bits: '1' }, 'tb_alu.s_step': { signed: 2 } },
+        { time: '35 ns', 'tb_alu.s_a': { bits: '01zx' }, 'tb_alu.s_ovfl': { bits: 'x' }, 'tb_alu.s_step': { signed: -1 } },
+        { time: '1 us', beyond: 'after', 'tb_alu.dut.s_sum': { bits: 'xxxx' }, 'tb_alu.s_phase': { string: 'done' } },
+      ],
     });
-
-    expect(result.structuredContent).toMatchObject({ ok: true, wave: { file: join(root, 'adder.fst'), format: 'fst' } });
-    expect((await readFile(join(root, 'adder.fst'))).length).toBeGreaterThan(0);
   });
 
   it('refuses a wave file outside the workspace', async () => {
