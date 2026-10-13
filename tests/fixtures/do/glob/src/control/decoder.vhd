@@ -1,0 +1,1 @@
+-- Decoder for the glob fixture.

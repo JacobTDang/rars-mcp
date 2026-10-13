@@ -1,0 +1,1 @@
+A folder named like a VHDL file, which glob -type f must skip.
