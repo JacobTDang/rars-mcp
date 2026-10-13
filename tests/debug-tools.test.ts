@@ -84,4 +84,25 @@ describe.runIf(process.env.RARS_JAR)('debug tools', () => {
     await handlers.debugCommand({ sessionId, action: 'backstep' });
     await handlers.sessionClose({ sessionId });
   });
+
+  it('refuses to write x0 and writes nothing else from that request', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 3000,
+      maxOutputBytes: 1024, bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const started = await handlers.debugStart({ source: '.text\nmain:\n  li t1, 100\n  addi t1, t1, 2\n  li a7, 10\n  ecall\n' });
+    const sessionId = (started.structuredContent as Record<string, unknown>).sessionId as string;
+    await expect(handlers.modify({ sessionId, registers: { t0: '0x11', zero: '0x40' } }))
+      .rejects.toThrow('Cannot write zero: x0 is hard-wired to zero');
+    await expect(handlers.modify({ sessionId, registers: { x0: '0x40' } })).rejects.toThrow('Cannot write x0: x0 is hard-wired to zero');
+    expect((await handlers.inspect({ sessionId, registers: ['zero', 't0'] })).structuredContent)
+      .toMatchObject({ registers: { zero: { hex: '0x00000000' }, t0: { hex: '0x00000000' } } });
+    expect((await handlers.debugCommand({ sessionId, action: 'continue' })).structuredContent).toMatchObject({ stopReason: 'exited' });
+    expect((await handlers.inspect({ sessionId, registers: ['t1'] })).structuredContent).toMatchObject({ registers: { t1: { signed: 102 } } });
+    await handlers.sessionClose({ sessionId });
+  });
 });

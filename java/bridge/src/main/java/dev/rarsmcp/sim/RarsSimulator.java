@@ -16,6 +16,7 @@ import rars.riscv.hardware.AddressErrorException;
 import rars.riscv.hardware.ControlAndStatusRegisterFile;
 import rars.riscv.hardware.FloatingPointRegisterFile;
 import rars.riscv.hardware.Memory;
+import rars.riscv.hardware.Register;
 import rars.riscv.hardware.RegisterFile;
 import rars.simulator.BackStepper;
 import rars.simulator.Simulator;
@@ -231,8 +232,17 @@ public final class RarsSimulator {
     synchronized void setRegister(String name, int value) {
         ensureLoaded();
         if (name.equals("pc")) { RegisterFile.setProgramCounter(value); return; }
-        requireKnownRegister(name);
+        requireWritableRegister(name);
         program.setRegisterValue(name, value);
+    }
+
+    // RARS would store a value in x0, and the program would then read it back.
+    private static void requireWritableRegister(String name) {
+        requireKnownRegister(name);
+        Register integer = RegisterFile.getRegister(name);
+        if (integer != null && integer.getNumber() == 0) {
+            throw new IllegalArgumentException("Cannot write " + name + ": x0 is hard-wired to zero");
+        }
     }
 
     // RARS looks names up in the integer, floating-point, then CSR files and
@@ -367,7 +377,7 @@ public final class RarsSimulator {
         Map<String, Integer> registerValues = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : registers.entrySet()) {
             String name = String.valueOf(entry.getKey());
-            if (!name.equals("pc")) requireKnownRegister(name);
+            if (!name.equals("pc")) requireWritableRegister(name);
             registerValues.put(name, (int) Words.parseValue(entry.getValue(), 4, name));
         }
         List<long[]> writes = new ArrayList<>();

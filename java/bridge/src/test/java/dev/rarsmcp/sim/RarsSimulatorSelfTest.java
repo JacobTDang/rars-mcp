@@ -155,7 +155,13 @@ public final class RarsSimulatorSelfTest {
                 "Value for t1 does not fit in 4 bytes: 0x100000000", "register value too wide");
         requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("t0", "0x11", "t1", "eleven"), Collections.emptyList()),
                 "Invalid value for t1: eleven", "register value not a number");
-        require(register(simulator, "t0") == 0 && register(simulator, "t1") == 0, "rejected registers are not written");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("t0", "0x11", "zero", "0x40"), Collections.emptyList()),
+                "Cannot write zero: x0 is hard-wired to zero", "write to zero");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("x0", "0"), Arrays.asList(write("0x10010000", 4, "0x55"))),
+                "Cannot write x0: x0 is hard-wired to zero", "write to x0");
+        requireThrows(IllegalArgumentException.class, () -> simulator.modify(registers("x00", "0x40"), Collections.emptyList()),
+                "Cannot write x00: x0 is hard-wired to zero", "write to another name for x0");
+        require(register(simulator, "t0") == 0 && register(simulator, "t1") == 0 && register(simulator, "zero") == 0, "rejected registers are not written");
 
         requireThrows(AddressErrorException.class, () -> simulator.modify(none, Arrays.asList(
                 write("0x10010000", 4, "0x55"), write("0x7", 4, "0x66"), write("0x10010004", 4, "0x77"))),
