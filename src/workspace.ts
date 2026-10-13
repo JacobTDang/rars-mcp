@@ -161,7 +161,7 @@ export class Workspace {
       }
 
       // The folder must exist; resolving it also catches a folder symlink that leads out.
-      canonicalCandidate = join(await realpath(dirname(candidate)), basename(candidate));
+      canonicalCandidate = join(await this.existingFolder(requestedPath, dirname(candidate)), basename(candidate));
       missing = true;
     }
 
@@ -174,6 +174,19 @@ export class Workspace {
       });
     }
     return canonicalCandidate;
+  }
+
+  // The canonical form of the folder that will hold the new output requestedPath.
+  private async existingFolder(requestedPath: string, folder: string): Promise<string> {
+    try {
+      return await realpath(folder);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      throw new RarsError('PATH_NOT_FOUND', `folder ${dirname(requestedPath)} does not exist in the workspace`, {
+        path: requestedPath,
+        cause: message(error),
+      });
+    }
   }
 
   private outside(requestedPath: string): never {

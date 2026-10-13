@@ -69,6 +69,18 @@ describe('Workspace', () => {
     );
   });
 
+  it.each([
+    ['nodir/dump.hex', 'nodir'],
+    ['src/nodir/deeper/dump.hex', 'src/nodir/deeper'],
+  ])('names the missing folder of the new output %s', async (path, folder) => {
+    const workspace = await Workspace.create(fixtureRoot);
+
+    await expect(workspace.resolve(path, { allowMissing: true })).rejects.toMatchObject({
+      code: 'PATH_NOT_FOUND',
+      message: `folder ${folder} does not exist in the workspace`,
+    });
+  });
+
   it('refuses a new output that is a dangling symlink leading out of the workspace', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'rars-outside-'));
     await symlink(join(outside, 'escaped.hex'), join(fixtureRoot, 'link.hex'));

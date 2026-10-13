@@ -2,11 +2,75 @@ import { execFileSync } from 'node:child_process';
 import { access, mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
 
+import { createMcpServer } from '../src/server.js';
 import { SessionStore } from '../src/sessions/store.js';
 import { createToolHandlers } from '../src/tools/handlers.js';
+import { inspectSchema, liveCommandSchema, modifySchema } from '../src/tools/schemas.js';
 import { Workspace } from '../src/workspace.js';
+
+describe('memory address and value schemas', () => {
+  const sessionId = '00000000-0000-4000-8000-000000000000';
+  const issuesOf = (result: { error?: { issues: unknown[] } }) => result.error?.issues;
+
+  it.each(['x', '', '0x', '-4', '+4', '1.5', '0x1g', ' 4', '#10', '010'])('refuses the address %j', (address) => {
+    const issue = { path: ['memory', 0, 'address'], message: `address must be a hex or decimal number: ${JSON.stringify(address)}` };
+
+    expect(issuesOf(inspectSchema.safeParse({ sessionId, memory: [{ address, length: 4 }] })))
+      .toEqual([expect.objectContaining(issue)]);
+    expect(issuesOf(modifySchema.safeParse({ sessionId, memory: [{ address, value: '1', width: 4 }] })))
+      .toEqual([expect.objectContaining(issue)]);
+    expect(issuesOf(liveCommandSchema.safeParse({ sessionId, command: { action: 'inspect', memory: [{ address, length: 4 }] } })))
+      .toEqual([expect.objectContaining({ ...issue, path: ['command', ...issue.path] })]);
+  });
+
+  it.each(['abc', '', '0x', '--1', '1e3', '-0x1', '0x-1', '007', '-01'])('refuses the value %j', (value) => {
+    expect(issuesOf(modifySchema.safeParse({ sessionId, memory: [{ address: '0x10010000', value, width: 4 }] }))).toEqual([
+      expect.objectContaining({ path: ['memory', 0, 'value'], message: `value must be a hex or decimal number: ${JSON.stringify(value)}` }),
+    ]);
+  });
+
+  it('accepts hex and decimal addresses, and hex, decimal and negative decimal values', () => {
+    expect(inspectSchema.safeParse({ sessionId, memory: ['0x10010000', '0X1001000C', '268500992', '0']
+      .map((address) => ({ address, length: 4 })) }).success).toBe(true);
+    expect(modifySchema.safeParse({ sessionId, memory: ['-1', '0xff', '42', '0', '-9223372036854775808', '0xffffffffffffffff']
+      .map((value) => ({ address: '0x10010000', value, width: 8 })) }).success).toBe(true);
+  });
+
+  it('names the field and the number in the tool reply', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-debug-tools-'));
+    const sessions = new SessionStore();
+    const get = vi.spyOn(sessions, 'get');
+    const server = createMcpServer({
+      workspace: await Workspace.create(root), sessions, run: async () => {
+        throw new Error('not used');
+      }, javaExecutable: 'java', rarsJar: '/rars.jar', timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await client.callTool({ name, arguments: args });
+      return { isError: result.isError, text: (result.content as Array<{ text: string }>).map((item) => item.text).join('\n') };
+    };
+    try {
+      expect(await call('rars_inspect', { sessionId, memory: [{ address: 'x', length: 4 }] })).toEqual({
+        isError: true, text: expect.stringContaining('memory.0.address: address must be a hex or decimal number: "x"'),
+      });
+      expect(await call('rars_modify', { sessionId, memory: [{ address: '0x10010000', value: 'abc', width: 4 }] })).toEqual({
+        isError: true, text: expect.stringContaining('memory.0.value: value must be a hex or decimal number: "abc"'),
+      });
+      expect(get).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
 
 describe.runIf(process.env.RARS_JAR)('debug tools', () => {
   it('debugs inline source with named instructions and removes it on close', async () => {

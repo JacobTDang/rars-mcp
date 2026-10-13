@@ -48,21 +48,32 @@ function formatErrorDetails(stderr: string, diagnostics: ReturnType<typeof parse
   return [...formatted, ...remaining];
 }
 
+// The dumps with each label replaced by its address. A program that does not assemble has no labels, so
+// it gets no dumps, and the error the bridge gave; RARS then reports the failure as for any program.
 async function resolveDumps(
   dumps: DumpInput[], files: string[], input: AssembleInput | RunInput, deps: ToolDependencies,
-): Promise<ResolvedDump[]> {
+): Promise<{ dumps: ResolvedDump[]; assemblyError?: Error }> {
   const labels = dumps.filter((dump) => typeof dump.segment !== 'string' && 'label' in dump.segment);
   let symbols: Array<{ name: string; address: string }> = [];
   if (labels.length) {
     if (!deps.bridgeJar || !deps.bridgeToken) throw new Error('Label dumps require the stateful RARS bridge to be configured');
     const runInput = input as RunInput;
-    const session = await HeadlessSession.create({
-      javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
-      token: deps.bridgeToken, files,
-      ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
-      ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
-      timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes,
-    });
+    let session: HeadlessSession;
+    try {
+      session = await HeadlessSession.create({
+        javaExecutable: deps.javaExecutable, bridgeJar: deps.bridgeJar, rarsJar: deps.rarsJar,
+        token: deps.bridgeToken, files,
+        ...(runInput.programArgs === undefined ? {} : { programArgs: runInput.programArgs }),
+        ...(runInput.stdin === undefined ? {} : { stdin: runInput.stdin }),
+        timeoutMs: deps.timeoutMs, maxOutputBytes: deps.maxOutputBytes,
+      });
+    } catch (error) {
+      // The bridge refuses a program that does not assemble with RARS's own diagnostics.
+      if (error instanceof Error && parseDiagnostics(error.message).some((diagnostic) => diagnostic.severity === 'error')) {
+        return { dumps: [], assemblyError: error };
+      }
+      throw error;
+    }
     try {
       const inspected = await session.inspect({ includeSymbols: true }) as { symbols?: Array<{ name: string; address: string }> };
       symbols = inspected.symbols ?? [];
@@ -70,15 +81,17 @@ async function resolveDumps(
       await session.close();
     }
   }
-  return dumps.map((dump) => {
-    const segment = dump.segment;
-    if (typeof segment === 'string') return { input: dump, segment };
-    if ('address' in segment) return { input: dump, segment: addressRange(segment.address, segment.words) };
-    const address = symbols.find((symbol) => symbol.name === segment.label)?.address;
-    if (address === undefined) throw new Error(`Unknown dump label: ${segment.label}`);
-    if (!isWordAligned(address)) throw new Error(`dump label ${segment.label} at ${address} is not word aligned`);
-    return { input: dump, segment: addressRange(address, segment.words) };
-  });
+  return {
+    dumps: dumps.map((dump) => {
+      const segment = dump.segment;
+      if (typeof segment === 'string') return { input: dump, segment };
+      if ('address' in segment) return { input: dump, segment: addressRange(segment.address, segment.words) };
+      const address = symbols.find((symbol) => symbol.name === segment.label)?.address;
+      if (address === undefined) throw new Error(`Unknown dump label: ${segment.label}`);
+      if (!isWordAligned(address)) throw new Error(`dump label ${segment.label} at ${address} is not word aligned`);
+      return { input: dump, segment: addressRange(address, segment.words) };
+    }),
+  };
 }
 
 // A killed or cut-off run never reaches the point where RARS prints the count and writes the dumps,
@@ -95,7 +108,7 @@ export function createToolHandlers(deps: ToolDependencies) {
     const source = input.source === undefined ? undefined : await prepareSource(input.source);
     try {
       const files = source?.files ?? await Promise.all(input.files!.map((file) => deps.workspace.resolve(file)));
-      const resolvedDumps = await resolveDumps(dumps, files, input, deps);
+      const { dumps: resolvedDumps, assemblyError } = await resolveDumps(dumps, files, input, deps);
       const preparedDumps = await prepareDumps(
         resolvedDumps, (file) => deps.workspace.resolve(file, { allowMissing: true }),
       );
@@ -122,8 +135,10 @@ export function createToolHandlers(deps: ToolDependencies) {
           timeoutMs,
           maxOutputBytes: deps.maxOutputBytes,
         });
-        // RARS names the file of a dump it could not write, and a temporary path means nothing to the caller.
-        result = { ...ran, stderr: preparedDumps.remapText(ran.stderr) };
+        // RARS names the file of a dump it could not write and the file of each diagnostic, and a temporary
+        // path means nothing to the caller.
+        const stderr = preparedDumps.remapText(ran.stderr);
+        result = { ...ran, stderr: source === undefined ? stderr : source.remapText(stderr) };
         // RARS writes the dumps once the program has assembled, even when the run then fails, and prints
         // its reason for each one it cannot write.
         const dumpsWritten = runFinished(result) && !assemblyFailed(result.stderr);
@@ -132,19 +147,21 @@ export function createToolHandlers(deps: ToolDependencies) {
       } finally {
         await preparedDumps.cleanup();
       }
+      // Without the label addresses there are no dumps to return, so RARS must also fail to assemble the program.
+      if (assemblyError !== undefined && !assemblyFailed(result.stderr)) {
+        if (source !== undefined) assemblyError.message = source.remapText(assemblyError.message);
+        throw assemblyError;
+      }
       const rejected = argumentRejected(result.stderr);
       const finished = runFinished(result);
       const dumpsRequested = runInput.registers !== undefined || runInput.memoryRanges !== undefined;
       const dumped = finished && dumpsRequested ? extractDumps(result.stderr) : { stderr: result.stderr };
       const counted = finished && runInput.instructionCount ? extractInstructionCount(dumped.stderr) : {};
       const output = { ...dumped, ...counted };
-      const diagnostics = parseDiagnostics(output.stderr).map((diagnostic) => ({
-        ...diagnostic,
-        ...(diagnostic.file === undefined || source === undefined ? {} : { file: source.remapFile(diagnostic.file) }),
-      }));
+      const diagnostics = parseDiagnostics(output.stderr);
       const failed = rejected || result.exitCode !== 0 || diagnostics.some((item) => item.severity === 'error');
       const isError = failed || result.timedOut || result.truncated || unwrittenDumps.length > 0;
-      const action = mode === 'assemble' ? 'Assembly' : 'Execution';
+      const action = mode === 'assemble' || assemblyFailed(result.stderr) ? 'Assembly' : 'Execution';
       const outcome = result.timedOut ? `${action} timed out after ${timeoutMs} ms` :
         result.truncated ? `${action} output exceeded its limit` :
         failed ? `${action} failed` : `${action} completed`;

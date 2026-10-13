@@ -60,6 +60,23 @@ describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
     });
   });
 
+  it('reports inline source that does not assemble with its given name throughout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({ source: [{ name: 'main.s', text: '.text\nmain:\n  bogus a0\n' }] });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: 'Assembly failed\nmain.s:3:3: "bogus" is not a recognized operator' }],
+      structuredContent: { stderr: expect.stringMatching(/^Error in main\.s line 3 column 3: /) },
+    });
+    expect(JSON.stringify(result)).not.toContain('rars-inline-');
+  });
+
   it('reports the instruction count', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
@@ -348,6 +365,40 @@ describe.runIf(process.env.RARS_JAR)('rars_run dumps with RARS', () => {
     expect(result.structuredContent).not.toHaveProperty('dumps.1.text');
   });
 
+  const doesNotAssemble = '.data\nslot: .word 0\n.text\nmain:\n  li a7, 10\n  bogus a0\n  ecall\n';
+
+  it.each(['assemble', 'run'] as const)('reports inline source with a label dump that does not assemble as rars_%s does', async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+      bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    const result = await handlers[mode]({ source: doesNotAssemble, dump: [{ segment: { label: 'slot', words: 1 }, format: 'HexText' }] });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: 'Assembly failed\ninline.s:6:3: "bogus" is not a recognized operator' }]);
+    expect(result.structuredContent).toMatchObject({
+      exitCode: 0, diagnostics: [{ severity: 'error', file: 'inline.s', line: 6, column: 3 }],
+      stderr: expect.stringContaining('Error in inline.s line 6 column 3: "bogus" is not a recognized operator'),
+    });
+    expect(JSON.stringify(result)).not.toContain('rars-inline-');
+  });
+
+  it('refuses a label dump when RARS assembles the program the label lookup could not', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(),
+      run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, truncated: false }),
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+      bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'), bridgeToken: 'test-token',
+    });
+
+    await expect(handlers.run({ source: doesNotAssemble, dump: [{ segment: { label: 'slot', words: 1 }, format: 'HexText' }] }))
+      .rejects.toThrow(/^Error in inline\.s line 6 column 3: "bogus" is not a recognized operator$/);
+  });
+
   it('lists no unwritten dumps when the program does not assemble', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     const handlers = createToolHandlers({
@@ -502,6 +553,21 @@ describe.runIf(process.env.RARS_JAR)('rars_assemble dumps with RARS', () => {
       dump: [{ segment: '.text', format: 'HexText', file: 'link.hex' }],
     })).rejects.toThrow('Workspace output path is a symlink whose target does not exist: link.hex');
     expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('names a dump file folder that does not exist before running RARS', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const run = vi.fn(runRars);
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    await expect(handlers.run({
+      files: ['hello.asm'], dump: [{ segment: '.text', format: 'HexText', file: 'nodir/imem.hex' }],
+    })).rejects.toThrow(/^folder nodir does not exist in the workspace$/);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('rejects a dump format RARS does not accept', async () => {

@@ -197,6 +197,21 @@ describe('vhdl_run replies', () => {
     expect(result.content).toEqual([{ type: 'text', text: 'Simulation failed\n*** Caught signal 11 (SEGV_MAPERR)' }]);
   });
 
+  it('names a wave file folder that does not exist before running the simulator', async () => {
+    const root = await workspaceWith(['half_adder.vhd']);
+    const notRun = async () => {
+      throw new Error('the simulator is not run');
+    };
+    const handlers = createVhdlHandlers({
+      workspace: await Workspace.create(root),
+      vhdl: { name: 'fake', executable: 'fake-simulator', version: notRun, compile: notRun, run: notRun },
+      timeoutMs: 1000, maxOutputBytes: 1024,
+    });
+
+    await expect(handlers.run({ testbench: 'half_adder', files: ['half_adder.vhd'], wave: { file: 'nodir/out.vcd' } }))
+      .rejects.toThrow(/^folder nodir does not exist in the workspace$/);
+  });
+
   it('refuses to run without a configured simulator', async () => {
     const root = await workspaceWith(['half_adder.vhd']);
     const handlers = createVhdlHandlers({ workspace: await Workspace.create(root), timeoutMs: 1000, maxOutputBytes: 1024 });
