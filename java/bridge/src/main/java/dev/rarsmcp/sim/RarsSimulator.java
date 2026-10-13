@@ -88,10 +88,11 @@ public final class RarsSimulator {
         return new IllegalArgumentException(error.errors().generateErrorReport().trim());
     }
 
+    // Starts a run: load and reset both come here, and neither can be stepped back past.
     private void setup() throws Exception {
         program.setup(new ArrayList<>(arguments), stdin);
         RISCVprogram code = code();
-        code.getBackStepper().setEnabled(true);
+        clearHistory(code);
         Globals.program = code;
         status = "paused";
         stopReason = null;
@@ -455,6 +456,15 @@ public final class RarsSimulator {
 
     private BackStepper backStepper() throws Exception {
         return code().getBackStepper();
+    }
+
+    // A BackStepper cannot be emptied, so this gives the program a new one, as assembling it again would.
+    private static void clearHistory(RISCVprogram code) throws Exception {
+        BackStepper history = new BackStepper();
+        history.setEnabled(true);
+        Field field = RISCVprogram.class.getDeclaredField("backStepper");
+        field.setAccessible(true);
+        field.set(code, history);
     }
 
     private RISCVprogram code() throws Exception {

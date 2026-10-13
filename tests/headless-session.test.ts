@@ -256,6 +256,23 @@ describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
     await session.close();
   });
 
+  it('forgets the backstep history on reset', async () => {
+    const session = await HeadlessSession.create({
+      javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
+      rarsJar: process.env.RARS_JAR!, token: 'test-secret',
+      files: [resolve('tests/fixtures/debug.asm')], timeoutMs: 3_000,
+    });
+
+    expect(await session.command({ action: 'continue' })).toMatchObject({ stopReason: 'exited' });
+    await session.command({ action: 'reset' });
+    await expect(session.command({ action: 'backstep' })).rejects.toThrow('No backstep history');
+    expect(await session.inspect({ registers: ['a0', 'a7'] })).toMatchObject({
+      status: 'paused', programCounter: '0x00400000',
+      registers: { a0: { hex: '0x00000000' }, a7: { hex: '0x00000000' } },
+    });
+    await session.close();
+  });
+
   it('reads pc and names an unknown register in the error', async () => {
     const session = await HeadlessSession.create({
       javaExecutable: 'java', bridgeJar: resolve('java/bridge/build/rars-mcp-bridge.jar'),
