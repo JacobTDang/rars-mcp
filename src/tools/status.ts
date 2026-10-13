@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
+import type { SkippedRoot } from '../workspace.js';
 import type { ToolDependencies, ToolResult } from './handlers.js';
 
 const execFileAsync = promisify(execFile);
@@ -72,10 +73,17 @@ async function checkBridge(deps: ToolDependencies): Promise<Checked<{ jar: strin
   }
 }
 
-async function checkWorkspace(deps: ToolDependencies): Promise<Checked<{ roots: readonly string[]; clientRoots?: readonly string[] }>> {
+interface WorkspaceStatus {
+  roots: readonly string[];
+  clientRoots?: readonly string[];
+  skippedClientRoots?: readonly SkippedRoot[];
+}
+
+async function checkWorkspace(deps: ToolDependencies): Promise<Checked<WorkspaceStatus>> {
   const roots = deps.workspace.roots;
   try {
-    return { roots, clientRoots: await deps.workspace.clientRoots() };
+    const client = await deps.workspace.clientRoots();
+    return { roots, clientRoots: client.roots, skippedClientRoots: client.skipped };
   } catch (error) {
     return { roots, error: message(error) };
   }
@@ -179,11 +187,14 @@ export function createStatusHandler(deps: ToolDependencies) {
     const sessions = { count: deps.sessions.size };
     const live = checkLive(deps);
     const clientRoots = workspace.clientRoots?.length ? `; client roots: ${workspace.clientRoots.join(', ')}` : '';
+    const skippedRoots = workspace.skippedClientRoots?.length
+      ? `; skipped client roots: ${workspace.skippedClientRoots.map(({ root, reason }) => `${root} (${reason})`).join(', ')}`
+      : '';
     const text = [
       line('rars', rars.error, `RARS ${rars.version}, ${rars.jar}`),
       line('java', java.error, `${java.version}, ${java.home}`),
       line('bridge', bridge.error, `${bridge.jar}`),
-      line('workspace', workspace.error, `${workspace.roots.join(', ')}${clientRoots}`),
+      line('workspace', workspace.error, `${workspace.roots.join(', ')}${clientRoots}${skippedRoots}`),
       line('sessions', undefined, `${sessions.count} open`),
       line('live', live.error, `${live.discoveryDir}`),
       line('tclsh', tclsh.error, `Tcl ${tclsh.version}, ${tclsh.path}`),

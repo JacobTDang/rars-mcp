@@ -44,6 +44,9 @@ path, because writing through it would create its target. Folders come from, in 
 
 - **The client's roots.** A client that advertises the MCP `roots` capability has its roots used
   as workspace folders, so the workspace follows the client's project with no configuration.
+  A root that does not exist or names a folder on another host is skipped, and `rars_status` lists
+  it with the reason. If the client fails to answer `roots/list`, the call that asked reports the
+  error and the next call asks again.
 - **`RARS_WORKSPACE`.** One or more folders separated by `:` (`;` on Windows). Relative paths
   resolve against the first one.
 - **The starting folder.** Without `RARS_WORKSPACE`, the stdio entry point uses the folder the
@@ -52,10 +55,10 @@ path, because writing through it would create its target. Folders come from, in 
 ## Tools
 
 - **`rars_status`** — check the setup without writing a program: RARS and Java versions, the bridge
-  JAR, workspace folders and client roots, open sessions, and the `tclsh` used by `do_file_check` and
-  the VHDL simulator. For `tclsh` and the simulator it gives the executable, where it was found on
-  `PATH`, its version, and the variable that selects it (`TCLSH`, `VHDL_SIMULATOR`). Each missing
-  piece is reported in its own field.
+  JAR, workspace folders, client roots and any skipped client roots with the reason, open sessions,
+  and the `tclsh` used by `do_file_check` and the VHDL simulator. For `tclsh` and the simulator it
+  gives the executable, where it was found on `PATH`, its version, and the variable that selects it
+  (`TCLSH`, `VHDL_SIMULATOR`). Each missing piece is reported in its own field.
 
 ### Running programs
 
