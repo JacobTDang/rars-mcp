@@ -190,7 +190,10 @@ that keeps the run's results, names the dump and quotes RARS's reason.
   changes nothing. An 8-byte write must start on a word boundary, as an 8-byte read must. `x0`
   (`zero`) is hard-wired to zero, so a write to it is refused.
 - **`rars_session_list`**, **`rars_session_close`** — a session with no requests for
-  `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`.
+  `RARS_SESSION_IDLE_MS` closes itself and then reports `SESSION_EXPIRED`. A session whose bridge
+  connection fails is removed from the list at once; its waiting requests fail with the reason,
+  and later requests on its ID fail with `SESSION_FAILED` and the same reason. Other sessions are
+  not affected.
 
 ### The visible desktop session
 

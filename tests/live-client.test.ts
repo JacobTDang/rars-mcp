@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { LiveClient } from '../src/live/client.js';
 import { discoverLiveSession } from '../src/live/discovery.js';
 
-async function fakeBridge(token: string, mode = 'live') {
+// With resetOnCommand, a debug command resets the connection instead of being answered; with
+// garbageOnCommand, it is answered with a line that is not JSON.
+async function fakeBridge(token: string, mode = 'live', { resetOnCommand = false, garbageOnCommand = false } = {}) {
   const server = createServer((socket) => {
     let buffer = '';
     socket.on('data', (chunk) => {
@@ -16,6 +18,14 @@ async function fakeBridge(token: string, mode = 'live') {
         const at = buffer.indexOf('\n');
         const request = JSON.parse(buffer.slice(0, at));
         buffer = buffer.slice(at + 1);
+        if (resetOnCommand && request.command === 'command') {
+          socket.resetAndDestroy();
+          return;
+        }
+        if (garbageOnCommand && request.command === 'command') {
+          socket.write('#@! not json\n');
+          continue;
+        }
         const authenticated = request.command === 'hello' && request.payload.token === token;
         const result = request.command === 'hello'
           ? { protocolVersion: 1, mode }
@@ -51,6 +61,30 @@ describe('LiveClient', () => {
     const second = await fakeBridge('secret', 'headless');
     await expect(LiveClient.connect({ host: '127.0.0.1', port: second.port, token: 'secret', timeoutMs: 1000 })).rejects.toThrow('not a live RARS session');
     second.server.close();
+  });
+
+  it('fails the session when the live bridge resets the connection', async () => {
+    const bridge = await fakeBridge('secret', 'live', { resetOnCommand: true });
+    const client = await LiveClient.connect({ host: '127.0.0.1', port: bridge.port, token: 'secret', timeoutMs: 60_000 });
+    const failure = new Promise<Error>((resolve) => client.onFailure(resolve));
+
+    const command = client.command({ action: 'step' });
+
+    await expect(command).rejects.toMatchObject({ code: 'BRIDGE_DISCONNECTED', message: 'Live RARS connection failed: read ECONNRESET' });
+    expect(await failure).toBe(await command.catch((error: unknown) => error));
+    await expect(client.inspect({})).rejects.toBe(await failure);
+    bridge.server.close();
+  });
+
+  it('fails the session when the live bridge answers with a line that is not JSON', async () => {
+    const bridge = await fakeBridge('secret', 'live', { garbageOnCommand: true });
+    const client = await LiveClient.connect({ host: '127.0.0.1', port: bridge.port, token: 'secret', timeoutMs: 60_000 });
+
+    await expect(client.command({ action: 'step' })).rejects.toMatchObject({
+      code: 'BRIDGE_PROTOCOL_ERROR', message: 'Live RARS sent a line that is not JSON: #@! not json',
+    });
+    await expect(client.inspect({})).rejects.toMatchObject({ code: 'BRIDGE_PROTOCOL_ERROR' });
+    bridge.server.close();
   });
 });
 

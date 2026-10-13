@@ -6,8 +6,11 @@ export type RarsErrorCode =
   | 'CLIENT_ROOTS_UNAVAILABLE'
   | 'SESSION_NOT_FOUND'
   | 'SESSION_EXPIRED'
+  | 'SESSION_FAILED'
   | 'BRIDGE_START_TIMEOUT'
-  | 'BRIDGE_START_FAILED';
+  | 'BRIDGE_START_FAILED'
+  | 'BRIDGE_DISCONNECTED'
+  | 'BRIDGE_PROTOCOL_ERROR';
 
 export class RarsError extends Error {
   readonly code: RarsErrorCode;

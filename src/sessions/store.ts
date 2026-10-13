@@ -40,6 +40,10 @@ class QueuedBackend implements SessionBackend {
     return this.enqueue(() => this.target.close());
   }
 
+  onFailure(listener: (error: Error) => void): void {
+    this.target.onFailure(listener);
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation, operation);
     this.queue = result.then(() => undefined, () => undefined);
@@ -56,6 +60,7 @@ export class SessionStore {
   private readonly sessions = new Map<SessionId, QueuedBackend>();
   private readonly idleTimers = new Map<SessionId, NodeJS.Timeout>();
   private readonly expired = new Set<SessionId>();
+  private readonly failures = new Map<SessionId, Error>();
   private readonly idleMs: number;
 
   constructor(options: SessionStoreOptions = {}) {
@@ -70,6 +75,7 @@ export class SessionStore {
     const id = randomUUID();
     this.sessions.set(id, new QueuedBackend(backend));
     this.touch(id);
+    backend.onFailure((error) => this.failed(id, error));
     return id;
   }
 
@@ -78,6 +84,12 @@ export class SessionStore {
     if (!backend) {
       if (this.expired.has(id)) {
         throw new RarsError('SESSION_EXPIRED', `Session ${id} was closed after ${this.idleMs} ms without requests`, { id });
+      }
+      const failure = this.failures.get(id);
+      if (failure) {
+        throw new RarsError('SESSION_FAILED', `Session ${id} failed: ${failure.message}`, {
+          id, ...(failure instanceof RarsError ? { cause: failure.code } : {}),
+        });
       }
       throw new RarsError('SESSION_NOT_FOUND', `Session does not exist: ${id}`, { id });
     }
@@ -114,6 +126,18 @@ export class SessionStore {
     }, this.idleMs);
     timer.unref();
     this.idleTimers.set(id, timer);
+  }
+
+  // A session that stopped working by itself is removed at once, and its ID reports why. It is
+  // still closed, to release what it holds, such as a folder of inline source.
+  private failed(id: SessionId, error: Error): void {
+    const backend = this.sessions.get(id);
+    if (!backend) return;
+    this.forget(id);
+    this.failures.set(id, error);
+    backend.close().catch((closeError: unknown) => {
+      console.error(`Failed to close failed RARS session ${id}:`, closeError);
+    });
   }
 
   private forget(id: SessionId): void {

@@ -138,8 +138,6 @@ public final class BridgeServer {
                 // Assembling resets RARS's global state, which the visible RARS depends on.
                 if (!mode.equals("headless")) throw new IllegalStateException("encode runs only in a headless bridge");
                 return BridgeResponse.success(request.id, mapOf("instructions", simulator.encode(strings(payload.get("instructions")))));
-            case "close":
-                return BridgeResponse.success(request.id, mapOf("closed", true));
             default:
                 return BridgeResponse.error(request.id, "UNKNOWN_COMMAND", request.command);
         }

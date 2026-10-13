@@ -23,10 +23,10 @@ class StreamTransport implements Transport {
   async close(): Promise<void> { this.onclose?.(); }
 }
 
-async function connect(workspace?: string) {
+async function connect(workspace?: string, extraEnv: Record<string, string> = {}) {
   const toServer = new PassThrough();
   const toClient = new PassThrough();
-  const env = workspace === undefined ? {} : { RARS_WORKSPACE: workspace };
+  const env = { ...(workspace === undefined ? {} : { RARS_WORKSPACE: workspace }), ...extraEnv };
   const server = await startStdioServer({ env, input: toServer, output: toClient });
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(new StreamTransport(toClient, toServer));
@@ -62,4 +62,27 @@ describe('stdio server', () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toMatchObject({ stdout: 'hello from rars\n', exitCode: 0 });
   });
+
+  it.runIf(process.env.RARS_JAR)('keeps serving after closing a session whose continue timed out', async () => {
+    const uncaught: Error[] = [];
+    const record = (error: Error) => { uncaught.push(error); };
+    process.on('uncaughtException', record);
+    try {
+      const connection = await connect(await mkdtemp(join(tmpdir(), 'rars-stdio-')), { RARS_EXECUTION_TIMEOUT_MS: '3000' });
+      close = connection.close;
+      const call = (name: string, args: Record<string, unknown>) => connection.client.callTool({ name, arguments: args });
+
+      const started = await call('rars_debug_start', { source: [{ name: 'loop.s', text: '.text\nmain:\n  j main\n' }] });
+      const { sessionId } = started.structuredContent as { sessionId: string };
+      const timedOut = await call('rars_debug_command', { sessionId, action: 'continue', maxSteps: 2_147_483_647 });
+      expect(timedOut).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('timed out') }] });
+      expect((await call('rars_session_close', { sessionId })).isError).toBeFalsy();
+
+      const status = await call('rars_status', {});
+      expect(status.structuredContent).toMatchObject({ sessions: { count: 0 } });
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off('uncaughtException', record);
+    }
+  }, 30_000);
 });

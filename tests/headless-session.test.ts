@@ -123,6 +123,31 @@ describe('HeadlessSession startup', () => {
   }, 15_000);
 });
 
+// A java that runs tests/fake-bridge.mjs in the given mode and records its pid.
+function fakeBridge(mode: string): Promise<{ executable: string; directory: string }> {
+  return fakeJava([
+    'echo "$$" > "$(dirname "$0")/pids"',
+    `exec "${process.execPath}" "${resolve('tests/fake-bridge.mjs')}" ${mode}`,
+  ]);
+}
+
+describe('HeadlessSession after startup', () => {
+  it('fails the session and stops the bridge when the bridge resets the connection', async () => {
+    const { executable, directory } = await fakeBridge('reset');
+    const session = await startBridge(executable, 60_000);
+    const failure = new Promise<Error>((resolve) => session.onFailure(resolve));
+
+    const command = session.command({ action: 'step' });
+
+    await expect(command).rejects.toMatchObject({
+      code: 'BRIDGE_DISCONNECTED', message: 'RARS bridge connection failed: read ECONNRESET',
+    });
+    expect(await failure).toBe(await command.catch((error: unknown) => error));
+    await expect(session.inspect({})).rejects.toBe(await failure);
+    await expectStopped(await recordedPids(directory));
+  }, 15_000);
+});
+
 describe.runIf(process.env.RARS_JAR)('HeadlessSession', () => {
   it('controls a stateful RARS process and closes it', async () => {
     const session = await HeadlessSession.create({

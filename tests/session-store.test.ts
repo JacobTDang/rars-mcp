@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { RarsError } from '../src/errors.js';
 import { SessionStore } from '../src/sessions/store.js';
 import type {
   DebugCommand,
@@ -17,6 +18,7 @@ function backend(name: string): SessionBackend {
     inspect: async (_request: InspectRequest) => ({ status: 'paused' }),
     modify: async (_request: ModifyRequest): Promise<MachineState> => ({ status: 'paused' }),
     close: vi.fn(async () => undefined),
+    onFailure: () => undefined,
   };
 }
 
@@ -65,6 +67,25 @@ describe('SessionStore', () => {
       { id: first, kind: 'headless', state: 'paused', name: 'first' },
       { id: second, kind: 'headless', state: 'paused', name: 'second' },
     ]);
+  });
+
+  it('removes a session whose backend fails and reports why to later requests', async () => {
+    let fail!: (error: Error) => void;
+    const target = backend('failing');
+    target.onFailure = (listener) => { fail = listener; };
+    const store = new SessionStore();
+    const other = store.add(backend('other'));
+    const id = store.add(target);
+
+    fail(new RarsError('BRIDGE_DISCONNECTED', 'RARS bridge connection failed: read ECONNRESET'));
+
+    expect(await store.list()).toEqual([{ id: other, kind: 'headless', state: 'paused', name: 'other' }]);
+    expect(() => store.get(id)).toThrowError(expect.objectContaining({
+      code: 'SESSION_FAILED', message: `Session ${id} failed: RARS bridge connection failed: read ECONNRESET`,
+    }));
+    await expect(store.close(id)).rejects.toMatchObject({ code: 'SESSION_FAILED' });
+    // Closing it still releases what the session holds, such as a folder of inline source.
+    await vi.waitFor(() => expect(target.close).toHaveBeenCalledTimes(1));
   });
 
   it('reports a stable error for a missing session', () => {

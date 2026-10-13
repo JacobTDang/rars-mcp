@@ -87,4 +87,6 @@ export interface SessionBackend {
   inspect(request: InspectRequest): Promise<InspectResult>;
   modify(request: ModifyRequest): Promise<MachineState>;
   close(): Promise<void>;
+  // Calls listener once if the backend stops working by itself, such as when its connection fails.
+  onFailure(listener: (error: Error) => void): void;
 }
