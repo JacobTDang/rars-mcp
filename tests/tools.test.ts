@@ -92,6 +92,46 @@ describe.runIf(process.env.RARS_JAR)('rars_run with RARS', () => {
     expect((result.structuredContent as { stderr: string }).stderr).not.toMatch(/^5$/m);
   });
 
+  it('reports a run that stopped at its step limit as an error and keeps what RARS printed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({
+      source: '.text\nmain:\n  addi a0, a0, 1\n  j main\n', maxSteps: 100, instructionCount: true, registers: ['a0'],
+      dump: [{ segment: { address: '0x00400000', words: 2 }, format: 'HexText' }, { segment: '0x10040000-0x10040008', format: 'HexText' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Execution stopped at the step limit of 100, and RARS wrote no file for dump[1] (0x10040000-0x10040008)\n'
+        + 'Program terminated when maximum step limit 100 reached.\n'
+        + 'This segment has not been written to, there is nothing to dump.',
+    }]);
+    expect(result.structuredContent).toMatchObject({
+      stepLimitReached: true, instructionCount: 100, registers: { a0: { hex: '0x00000032', signed: 50 } },
+      dumps: [{ words: [expect.stringMatching(/^0x[0-9a-f]{8}$/), expect.stringMatching(/^0x[0-9a-f]{8}$/)] }, { format: 'HexText' }],
+    });
+  });
+
+  it('reports a run that ended before its step limit as completed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
+    await copyFile('tests/fixtures/hello.asm', join(root, 'hello.asm'));
+    const handlers = createToolHandlers({
+      workspace: await Workspace.create(root), sessions: new SessionStore(), run: runRars,
+      javaExecutable: 'java', rarsJar: process.env.RARS_JAR!, timeoutMs: 5000, maxOutputBytes: 64 * 1024,
+    });
+
+    const result = await handlers.run({ files: ['hello.asm'], maxSteps: 100 });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toEqual([{ type: 'text', text: 'Execution completed' }]);
+    expect(result.structuredContent).toMatchObject({ stepLimitReached: false });
+  });
+
   it('names the time limit when a run times out', async () => {
     const root = await mkdtemp(join(tmpdir(), 'rars-tools-'));
     await writeFile(join(root, 'loop.s'), '.text\nmain:\n  j main\n');

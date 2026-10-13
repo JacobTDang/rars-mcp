@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractDumps, extractInstructionCount } from '../src/rars/output.js';
+import { extractDumps, extractInstructionCount, stepLimitReached } from '../src/rars/output.js';
 
 // Captured from RARS 1.6 runs with the ic option.
 const stepLimit = '\nProgram terminated when maximum step limit 50 reached.\n\n50\nt0\t0x00000000\n';
@@ -8,6 +8,20 @@ const assemblyFailure = 'Error in /w/invalid.asm line 3 column 3: "x" is not a r
 // RARS prints a dump it could not write after the count and the register dump.
 const unwrittenDump = '\nProgram terminated by calling exit\n\n1\nt0\t0x00000000\n'
   + 'This segment has not been written to, there is nothing to dump.\n';
+
+describe('stepLimitReached', () => {
+  it('finds the line RARS prints when a run stops at its step limit', () => {
+    expect(stepLimitReached(stepLimit, 50)).toBe(true);
+  });
+
+  it('takes the line only for the step limit the run was given', () => {
+    expect(stepLimitReached(stepLimit, 500)).toBe(false);
+  });
+
+  it('is false for a run that ended on its own', () => {
+    expect(stepLimitReached(unwrittenDump, 50)).toBe(false);
+  });
+});
 
 describe('extractInstructionCount', () => {
   it('reads the count above the register dump and removes it from stderr', () => {

@@ -33,6 +33,11 @@ export function assemblyFailed(stderr: string): boolean {
   return stderr.includes(ASSEMBLY_FAILED);
 }
 
+// RARS prints this line when a run reaches the step count it was given, then the count and dumps as usual.
+export function stepLimitReached(stderr: string, maxSteps: number): boolean {
+  return stderr.split(/\r?\n/).includes(`Program terminated when maximum step limit ${maxSteps} reached.`);
+}
+
 // RARS prints one of these, and runs nothing, for a command line argument it does not take.
 const REJECTED_ARGUMENT = /^(?:Invalid Command Argument|Invalid\/unaligned address or invalid range): /m;
 
