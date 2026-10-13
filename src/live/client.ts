@@ -1,20 +1,14 @@
-import { createConnection, type Socket } from 'node:net';
-import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import { createConnection } from 'node:net';
 
+import { BridgeConnection } from '../sessions/connection.js';
 import type { DebugCommand, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionState, SessionSummary } from '../sessions/types.js';
 
 export interface LiveConnectionOptions { host: string; port: number; token: string; directory?: string; timeoutMs: number }
-interface Response { id: string; ok: boolean; result?: Record<string, unknown>; error?: { message: string } }
 
 export class LiveClient implements SessionBackend {
-  private readonly pending = new Map<string, { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   private state: SessionState = 'ready';
 
-  private constructor(private readonly socket: Socket, private readonly timeoutMs: number) {
-    createInterface({ input: socket, crlfDelay: Infinity }).on('line', (line) => this.receive(line));
-    socket.once('close', () => this.rejectAll(new Error('Live RARS connection closed')));
-  }
+  private constructor(private readonly connection: BridgeConnection) {}
 
   static async connect(options: LiveConnectionOptions): Promise<LiveClient> {
     const socket = createConnection({ host: options.host, port: options.port });
@@ -28,13 +22,17 @@ export class LiveClient implements SessionBackend {
       }
       throw error;
     }
-    const client = new LiveClient(socket, options.timeoutMs);
+    const client = new LiveClient(new BridgeConnection(socket, { name: 'Live RARS', timeoutMs: options.timeoutMs }));
     try {
       const hello = await client.request('hello', { token: options.token });
       if (hello.protocolVersion !== 1) throw new Error('Incompatible RARS bridge protocol');
       if (hello.mode !== 'live') throw new Error('Connected bridge is not a live RARS session');
       return client;
-    } catch (error) { socket.destroy(); throw error; }
+    } catch (error) {
+      client.connection.close('Live RARS session disconnected');
+      socket.destroy();
+      throw error;
+    }
   }
 
   async summary(): Promise<SessionSummary> { return { kind: 'live', state: this.state }; }
@@ -57,22 +55,11 @@ export class LiveClient implements SessionBackend {
   async load(payload: { files: string[]; programArgs?: string[]; stdin?: string; conflictPolicy: 'reject' | 'discard' }): Promise<Record<string, unknown>> {
     const result = await this.request('load', payload); this.update(result); return result;
   }
-  async close(): Promise<void> { this.socket.end(); this.rejectAll(new Error('Live RARS session disconnected')); }
+  async close(): Promise<void> { this.connection.close('Live RARS session disconnected'); }
+  onFailure(listener: (error: Error) => void): void { this.connection.onFailure(listener); }
 
   private request(command: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const id = randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Live RARS request timed out: ${command}`)); }, this.timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      this.socket.write(`${JSON.stringify({ protocolVersion: 1, id, command, payload })}\n`);
-    });
-  }
-  private receive(line: string): void {
-    const response = JSON.parse(line) as Response;
-    const pending = this.pending.get(response.id); if (!pending) return;
-    clearTimeout(pending.timer); this.pending.delete(response.id);
-    if (response.ok) pending.resolve(response.result ?? {}); else pending.reject(new Error(response.error?.message ?? 'Live RARS request failed'));
+    return this.connection.request(command, payload);
   }
   private update(result: Record<string, unknown>): void { if (typeof result.status === 'string') this.state = result.status as SessionState; }
-  private rejectAll(error: Error): void { for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(error); } this.pending.clear(); }
 }

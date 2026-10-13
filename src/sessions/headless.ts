@@ -1,10 +1,9 @@
 import type { ChildProcess } from 'node:child_process';
 import { delimiter } from 'node:path';
 import { createConnection, type Socket } from 'node:net';
-import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
 
-import { spawnBridge, watchStartup } from './bridge-process.js';
+import { spawnBridge, stopBridge, watchStartup } from './bridge-process.js';
+import { BridgeConnection } from './connection.js';
 import type { DebugCommand, EncodedInstruction, InspectRequest, InspectResult, MachineState, ModifyRequest, SessionBackend, SessionSummary, SessionState } from './types.js';
 
 interface BridgeOptions {
@@ -24,28 +23,17 @@ interface HeadlessOptions extends BridgeOptions {
   stdin?: string;
 }
 
-interface BridgeResponse {
-  id: string;
-  ok: boolean;
-  result?: Record<string, unknown>;
-  error?: { code: string; message: string };
-}
-
 export class HeadlessSession implements SessionBackend {
-  private readonly pending = new Map<string, { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+  private readonly connection: BridgeConnection;
   private state: SessionState = 'ready';
   private closed = false;
 
-  private constructor(
-    private readonly child: ChildProcess,
-    private readonly socket: Socket,
-    private readonly timeoutMs: number,
-  ) {
-    const lines = createInterface({ input: socket, crlfDelay: Infinity });
-    lines.on('line', (line) => this.receive(line));
-    const disconnected = () => this.rejectPending(new Error('RARS bridge connection closed'));
-    socket.once('close', disconnected);
-    child.once('exit', disconnected);
+  private constructor(private readonly child: ChildProcess, socket: Socket, timeoutMs: number) {
+    this.connection = new BridgeConnection(socket, { name: 'RARS bridge', timeoutMs });
+    // A failed session has no further use for its bridge.
+    this.connection.onFailure(() => {
+      stopBridge(child).catch((error: unknown) => console.error('Failed to stop the RARS bridge of a failed session:', error));
+    });
   }
 
   static async create(options: HeadlessOptions): Promise<HeadlessSession> {
@@ -57,7 +45,7 @@ export class HeadlessSession implements SessionBackend {
       session.updateState(state);
       return session;
     } catch (error) {
-      session.kill();
+      await session.close();
       throw error;
     }
   }
@@ -83,6 +71,7 @@ export class HeadlessSession implements SessionBackend {
     ]);
     const startup = watchStartup(child, options.timeoutMs);
     let socket: Socket | undefined;
+    let session: HeadlessSession | undefined;
     try {
       const port = await startup.within(startup.port);
       const connection = createConnection({ host: '127.0.0.1', port });
@@ -91,11 +80,13 @@ export class HeadlessSession implements SessionBackend {
         connection.once('connect', resolve);
         connection.once('error', reject);
       }));
-      const session = new HeadlessSession(child, connection, options.timeoutMs);
+      session = new HeadlessSession(child, connection, options.timeoutMs);
       await startup.within(session.request('hello', { token: options.token }));
       startup.finish();
       return session;
     } catch (error) {
+      // The startup error is the one to report, so the session is closed before its connection breaks.
+      session?.connection.close('RARS bridge did not start');
       socket?.destroy();
       await startup.abort();
       throw error;
@@ -131,50 +122,23 @@ export class HeadlessSession implements SessionBackend {
     return result as unknown as MachineState;
   }
 
+  // The bridge holds nothing worth keeping, so it is killed, and close returns once it has exited.
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.request('close', {}).catch(() => undefined);
-    this.socket.end();
-    this.child.kill('SIGTERM');
-    this.rejectPending(new Error('RARS session closed'));
+    this.connection.close('RARS session closed');
+    await stopBridge(this.child);
   }
 
   isClosed(): boolean { return this.closed; }
 
-  private kill(): void {
-    this.socket.destroy();
-    this.child.kill('SIGKILL');
-  }
+  onFailure(listener: (error: Error) => void): void { this.connection.onFailure(listener); }
 
   private request(command: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const id = randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RARS bridge request timed out: ${command}`));
-      }, this.timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      this.socket.write(`${JSON.stringify({ protocolVersion: 1, id, command, payload })}\n`);
-    });
-  }
-
-  private receive(line: string): void {
-    const response = JSON.parse(line) as BridgeResponse;
-    const pending = this.pending.get(response.id);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pending.delete(response.id);
-    if (!response.ok) pending.reject(new Error(response.error?.message ?? 'RARS bridge request failed'));
-    else pending.resolve(response.result ?? {});
+    return this.connection.request(command, payload);
   }
 
   private updateState(result: Record<string, unknown>): void {
     if (typeof result.status === 'string') this.state = result.status as SessionState;
-  }
-
-  private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
-    this.pending.clear();
   }
 }

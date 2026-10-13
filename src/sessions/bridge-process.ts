@@ -60,6 +60,7 @@ export function watchStartup(child: ChildProcess, timeoutMs: number): BridgeStar
   child.once('close', onClose);
 
   const lines = createInterface({ input: child.stderr!, crlfDelay: Infinity });
+  lines.on('error', onError);
   const port = new Promise<number>((resolve) => {
     lines.on('line', (line) => {
       const match = line.match(/^RARS_MCP_PORT=(\d+)$/);
@@ -82,14 +83,19 @@ export function watchStartup(child: ChildProcess, timeoutMs: number): BridgeStar
     finish: stopWatching,
     async abort() {
       stopWatching();
-      if (child.pid === undefined) return;
-      const exited = child.exitCode !== null || child.signalCode !== null
-        ? Promise.resolve()
-        : new Promise<void>((resolve) => child.once('exit', () => resolve()));
-      signalBridge(child, 'SIGKILL');
-      await exited;
+      await stopBridge(child);
     },
   };
+}
+
+// Kills the bridge and everything it started, and waits for the bridge to exit.
+export async function stopBridge(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined) return;
+  const exited = child.exitCode !== null || child.signalCode !== null
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  signalBridge(child, 'SIGKILL');
+  await exited;
 }
 
 function captureStream(stream: NodeJS.ReadableStream) {

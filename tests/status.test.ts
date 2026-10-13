@@ -57,6 +57,7 @@ const fakeBackend: SessionBackend = {
   inspect: async () => ({ status: 'paused' }),
   modify: async () => ({ status: 'paused' }),
   close: async () => undefined,
+  onFailure: () => undefined,
 };
 
 describe.runIf(process.env.RARS_JAR)('rars_status with RARS', () => {
