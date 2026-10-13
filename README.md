@@ -146,11 +146,11 @@ program. For file-backed dumps, the target folder must already exist.
 
 ### VHDL
 
-`vhdl_compile`, `vhdl_run` and `vhdl_mutate` run nvc, which is installed separately
-(`brew install nvc` on macOS) and is not in the Docker image; set `VHDL_SIMULATOR` if it is not on
-`PATH`. They build the design library in a temporary folder that is removed after each call, so
-only a requested wave file is written to the workspace, and they share the wall-clock and output
-limits of a RARS run.
+`vhdl_compile`, `vhdl_run` and `vhdl_mutate` run nvc, which is included in the Docker image.
+For a local installation, install it separately (`brew install nvc` on macOS); set
+`VHDL_SIMULATOR` if it is not on `PATH`. They build the design library in a temporary folder
+that is removed after each call, so only a requested wave file is written to the workspace.
+They share the wall-clock and output limits of a RARS run.
 
 - **`vhdl_compile`** — analyse VHDL files in the given order and return diagnostics with file, line
   and column. Options: `std` (`93`, `02`, `08` or `19`; `08` by default, `02` matches Questa's
@@ -211,8 +211,9 @@ limits of a RARS run.
   plus the `vlib` libraries, the `vsim` top and any Tcl error with its file and line. `std` sets
   the standard for `vcom` calls that name none.
 
-`do_file_check` runs the script with `tclsh` 8.5 or later, which the Docker image does not
-include. `vlib`, `vmap`, `vcom`, `vlog`, `vsim`, `run`, `add wave` and the other common Questa
+`do_file_check` runs the script with `tclsh` 8.5 or later, included in the Docker image.
+For local installations, set `TCLSH` if it is not on `PATH`.
+`vlib`, `vmap`, `vcom`, `vlog`, `vsim`, `run`, `add wave` and the other common Questa
 commands are stubs that record their calls. The script has no shell or file access: nested `do`
 files and `file exists` are answered from the workspace. Relative paths resolve from the script's
 folder, as if Questa ran it there.
@@ -221,14 +222,19 @@ folder, as if Questa ran it there.
 
 Requirements: Docker Desktop with Compose.
 
+The image includes nvc 1.23.0 and Tcl 8.6 (`tclsh`) alongside Node.js, Java and RARS, so the
+VHDL tools and `.do` script checks work without host installations. nvc is built from a
+SHA-256-verified release tarball in a separate stage; build tools stay out of the runtime image.
+Both executables are on `PATH`, and the server runs as the unprivileged `node` user.
+
 ```sh
 mkdir -p workspace
 docker compose up -d --build
 curl http://127.0.0.1:3000/health
 ```
 
-Put `.s` files in `workspace/`. HTTP-capable clients connect to `http://127.0.0.1:3000/mcp`.
-Stdio-only clients use the proxy, which forwards to that server:
+Put `.s`, `.vhd` and `.do` files in `workspace/`. HTTP-capable clients connect to
+`http://127.0.0.1:3000/mcp`. Stdio-only clients use the proxy, which forwards to that server:
 
 ```sh
 docker exec -i rars-mcp node dist/src/stdio-proxy.js
@@ -236,6 +242,11 @@ docker exec -i rars-mcp node dist/src/stdio-proxy.js
 
 View logs with `docker compose logs -f`, stop with `docker compose down`, and rebuild after an
 update with `docker compose build --no-cache && docker compose up -d`.
+
+Run `scripts/test-docker-image.sh` to build and smoke-test the image. It checks nvc and Tcl,
+then calls the VHDL tools and `do_file_check` through the stdio server using the adder fixtures.
+Any build, executable or tool failure exits non-zero. An optional first argument sets the image
+tag (default: `rars-mcp:smoke`).
 
 ## Desktop session
 
