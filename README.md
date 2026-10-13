@@ -226,8 +226,11 @@ They share the wall-clock and output limits of a RARS run.
 For local installations, set `TCLSH` if it is not on `PATH`.
 `vlib`, `vmap`, `vcom`, `vlog`, `vsim`, `run`, `add wave` and the other common Questa
 commands are stubs that record their calls. The script has no shell or file access: nested `do`
-files and `file exists` are answered from the workspace. Relative paths resolve from the script's
-folder, as if Questa ran it there.
+files, `file exists`, `glob` and `pwd` are answered from the workspace. Relative paths resolve from
+the script's folder, as if Questa ran it there, and `pwd` returns that folder. `glob` takes
+`-nocomplain`, `-types f` or `d`, `-directory`, `-tails` and several patterns, returns matches
+sorted and in the form the pattern was written, and fails when a pattern leads outside the
+workspace.
 
 ## Run in Docker
 

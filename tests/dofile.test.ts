@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -188,6 +188,125 @@ describe('do_file_check', () => {
     await mkdir(join(root, 'work'));
     const existing = await check({ path: 'run.do' }, root);
     expect(existing.report.steps.map((step) => step.command)).toEqual(['vdel', 'vlib', 'vsim']);
+  });
+
+  it('compiles the files a recursive glob finds, packages first', async () => {
+    const { result, report, root } = await check({ path: 'glob/compile.do' });
+    const folder = join(root, 'glob');
+
+    expect(report.errors).toEqual([]);
+    expect(report.compiles.map(({ file, exists, std, order }) => ({ file, exists, std, order }))).toEqual([
+      { file: 'src/cpu_pkg.vhd', exists: true, std: '2008', order: 1 },
+      { file: 'src/alu.vhd', exists: true, std: '2008', order: 2 },
+      { file: 'src/regfile.vhd', exists: true, std: '2008', order: 3 },
+      { file: 'src/control/decoder.vhd', exists: true, std: '2008', order: 4 },
+      { file: 'src/control/fsm.vhd', exists: true, std: '2008', order: 5 },
+      { file: join(folder, 'tb/cpu_tb.vhd'), exists: true, std: '2008', order: 6 },
+    ]);
+    expect(report.cwd).toBe(folder);
+    expect(report.simulate?.top).toBe('work.cpu_tb');
+    expect(report.ok).toBe(true);
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('fails loudly when a glob leads outside the workspace, even with -nocomplain', async () => {
+    const recurse = 'proc vhd_files_under {dir} {\n'
+      + '  set found [glob -nocomplain -type f [file join $dir *.vhd]]\n'
+      + '  foreach sub [glob -nocomplain -type d [file join $dir *]] { set found [concat $found [vhd_files_under $sub]] }\n'
+      + '  return $found\n'
+      + '}\n';
+    const parent = await scratchWorkspace({
+      'outside/secret.vhd': '',
+      'project/a.vhd': '',
+      'project/parent.do': `${recurse}foreach file [vhd_files_under ..] { vcom $file }\n`,
+      'project/directory.do': 'vlib work\nvcom [glob -nocomplain -directory ../outside *.vhd]\n',
+      'project/link.do': 'vlib work\nvcom [glob -nocomplain -type f link/*.vhd]\n',
+    });
+    const root = join(parent, 'project');
+    await symlink(join(parent, 'outside'), join(root, 'link'));
+
+    for (const [script, line, path] of [['parent.do', 6, '..'], ['directory.do', 2, '../outside'], ['link.do', 2, 'link']] as const) {
+      const { result, report } = await check({ path: script }, root);
+
+      expect(report.errors).toEqual([{ file: join(root, script), line, message: `Path is outside the workspace folders: ${path}` }]);
+      expect(report.compiles).toEqual([]);
+      expect(JSON.stringify(report)).not.toContain('secret');
+      expect(result.isError).toBe(true);
+    }
+  });
+
+  it('supports the glob forms Questa scripts use and returns paths as the script wrote them', async () => {
+    const script = [
+      'puts [glob rtl/*.vhd]',
+      'puts [glob ./rtl/*.vhd tb/*.vhd]',
+      'puts [glob -directory rtl -type f *]',
+      'puts [glob -tails -directory rtl *.vhd]',
+      'puts [glob -types d rtl/*]',
+      'puts [glob -dir rtl -types {f d} -- *]',
+      'puts [glob -nocomplain *.missing]',
+      'puts [glob rtl/a.vhd rtl/absent.vhd]',
+      'puts [glob */*.vhd]',
+      'puts [glob "{rtl,tb}/*.vhd"]',
+      'puts [glob [file join [pwd] tb *.vhd]]',
+      'puts [pwd]',
+    ].join('\n');
+    const root = await scratchWorkspace({
+      'rtl/a.vhd': '', 'rtl/b.vhd': '', 'rtl/.hidden.vhd': '', 'rtl/notes.txt': '', 'rtl/sub/c.vhd': '', 'tb/tb.vhd': '',
+      'run.do': `${script}\n`,
+    });
+
+    const { report } = await check({ path: 'run.do' }, root);
+
+    expect(report.errors).toEqual([]);
+    expect(report.steps.map((step) => step.args)).toEqual([
+      ['rtl/a.vhd rtl/b.vhd'],
+      ['./rtl/a.vhd ./rtl/b.vhd tb/tb.vhd'],
+      ['rtl/a.vhd rtl/b.vhd rtl/notes.txt'],
+      ['a.vhd b.vhd'],
+      ['rtl/sub'],
+      ['rtl/a.vhd rtl/b.vhd rtl/notes.txt rtl/sub'],
+      [''],
+      ['rtl/a.vhd'],
+      ['rtl/a.vhd rtl/b.vhd tb/tb.vhd'],
+      ['rtl/a.vhd rtl/b.vhd tb/tb.vhd'],
+      [join(root, 'tb/tb.vhd')],
+      [root],
+    ]);
+  });
+
+  it('names an unsupported glob option instead of matching nothing', async () => {
+    const script = [
+      'glob -join rtl *.vhd',
+      'glob -path rtl/ *.vhd',
+      'glob -types l *',
+      'glob -bogus *',
+      'glob -tails *',
+      'glob nothing*',
+      'glob nothing* none*',
+      'glob -directory',
+      'glob',
+      'glob ~/*.vhd',
+      'pwd extra',
+    ].map((command) => `catch {${command}} message; puts $message`).join('\n');
+    const root = await scratchWorkspace({ 'run.do': `${script}\nglob -nocomplain -type f -join rtl *.vhd\nvcom never.vhd\n` });
+
+    const { report } = await check({ path: 'run.do' }, root);
+
+    expect(report.steps.map((step) => step.args[0])).toEqual([
+      'glob -join is not available in a dry run',
+      'glob -path is not available in a dry run',
+      'glob -types l is not available in a dry run',
+      'bad option "-bogus": must be -directory, -nocomplain, -tails, -types, or --',
+      '"-tails" must be used with "-directory"',
+      'no files matched glob pattern "nothing*"',
+      'no files matched glob patterns "nothing* none*"',
+      'missing argument to "-directory"',
+      'wrong # args: should be "glob ?switches? name ?name ...?"',
+      'glob cannot expand ~ in a dry run: ~/*.vhd',
+      'wrong # args: should be "pwd"',
+    ]);
+    expect(report.errors).toEqual([{ file: join(root, 'run.do'), line: 12, message: 'glob -join is not available in a dry run' }]);
+    expect(report.compiles).toEqual([]);
   });
 
   it('stops at quit but not at quit -sim', async () => {

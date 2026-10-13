@@ -84,6 +84,106 @@ proc ::dofilecheck::pathCommand {subcommand args} {
   }
 }
 
+proc ::dofilecheck::pwdCommand {args} {
+  variable cwd
+  if {[llength $args] != 0} { return -code error {wrong # args: should be "pwd"} }
+  return $cwd
+}
+
+# Resolves an option the way Tcl's glob does, abbreviations included.
+proc ::dofilecheck::globOption {argument} {
+  set matches {}
+  foreach option {-directory -join -nocomplain -path -tails -types --} {
+    if {$option eq $argument} { return $option }
+    if {[string first $argument $option] == 0} { lappend matches $option }
+  }
+  if {[llength $matches] == 1} { return [lindex $matches 0] }
+  set problem [expr {[llength $matches] == 0 ? "bad" : "ambiguous"}]
+  return -code error "$problem option \"$argument\": must be -directory, -nocomplain, -tails, -types, or --"
+}
+
+# A leading ~ is refused, as Tcl would read it as a home folder.
+proc ::dofilecheck::globParts {path} {
+  set parts [::file split $path]
+  if {[string match ~* [lindex $parts 0]]} { return -code error "glob cannot expand ~ in a dry run: $path" }
+  return $parts
+}
+
+proc ::dofilecheck::partsPath {parts} {
+  if {[llength $parts] == 0} { return . }
+  return [::file join {*}$parts]
+}
+
+# The paths after the -directory parts that a pattern's parts can name. A part without wildcards is
+# kept as written; a part with them is matched in each folder reached so far, once the runner has
+# confirmed that folder is inside the workspace. Tcl leaves the order open; sorted keeps it repeatable.
+proc ::dofilecheck::globTails {base parts} {
+  variable cwd
+  set tails [list {}]
+  foreach part $parts {
+    set next {}
+    foreach tail $tails {
+      if {![regexp {[*?\[\]{}\\]} $part]} {
+        lappend next [concat $tail [list $part]]
+        continue
+      }
+      set folder [partsPath [concat $base $tail]]
+      if {[lookup stat $folder] ne "directory"} continue
+      foreach name [lsort [::glob -nocomplain -tails -directory [::file join $cwd $folder] -- $part]] {
+        # Joined as it is, a name starting with ~ would read as a home folder.
+        if {[string match ~* $name]} { set name ./$name }
+        lappend next [concat $tail [list $name]]
+      }
+    }
+    set tails $next
+  }
+  return $tails
+}
+
+# glob over the workspace only. Every match is checked with the runner before it is returned, so a
+# pattern that leads outside the workspace is an error, with or without -nocomplain.
+proc ::dofilecheck::globCommand {args} {
+  set complain 1
+  set tails 0
+  set types {}
+  while {[llength $args] > 0 && [string match -* [lindex $args 0]]} {
+    set option [globOption [lindex $args 0]]
+    set args [lrange $args 1 end]
+    if {$option eq "--"} break
+    switch -exact -- $option {
+      -nocomplain { set complain 0 }
+      -tails { set tails 1 }
+      -directory - -types {
+        if {[llength $args] == 0} { return -code error "missing argument to \"$option\"" }
+        if {$option eq "-directory"} { set base [globParts [lindex $args 0]] } else { set types [lindex $args 0] }
+        set args [lrange $args 1 end]
+      }
+      default { return -code error "glob $option is not available in a dry run" }
+    }
+  }
+  foreach type $types {
+    if {$type ni {f d}} { return -code error "glob -types $type is not available in a dry run" }
+  }
+  if {[llength $args] == 0} { return -code error {wrong # args: should be "glob ?switches? name ?name ...?"} }
+  if {$tails && ![info exists base]} { return -code error {"-tails" must be used with "-directory"} }
+  if {![info exists base]} { set base {} }
+
+  set matches {}
+  foreach pattern $args {
+    foreach tail [globTails $base [globParts $pattern]] {
+      set path [partsPath [concat $base $tail]]
+      set kind [lookup stat $path]
+      if {$kind eq "missing" || ([llength $types] > 0 && [dict get {file f directory d other {}} $kind] ni $types)} continue
+      lappend matches [expr {$tails ? [partsPath $tail] : $path}]
+    }
+  }
+  if {$complain && [llength $matches] == 0} {
+    set noun [expr {[llength $args] == 1 ? "pattern" : "patterns"}]
+    return -code error "no files matched glob $noun \"[join $args]\""
+  }
+  return $matches
+}
+
 # do runs a nested script; source does the same for a Tcl file.
 proc ::dofilecheck::include {command args} {
   record $command {*}$args
@@ -116,7 +216,8 @@ proc ::dofilecheck::runFile {path} {
   return -code error -errorcode $errorCode $message
 }
 
-proc ::dofilecheck::main {path} {
+proc ::dofilecheck::main {path folder} {
+  variable cwd $folder
   variable interp [interp create -safe]
   foreach command {
     vlib vmap vcom vlog vopt vsim vdel run add wave view config configure radix force noforce restart
@@ -127,6 +228,8 @@ proc ::dofilecheck::main {path} {
   foreach command {quit exit} { interp alias $interp $command {} ::dofilecheck::quit $command }
   foreach command {do source} { interp alias $interp $command {} ::dofilecheck::include $command }
   interp alias $interp file {} ::dofilecheck::pathCommand
+  interp alias $interp glob {} ::dofilecheck::globCommand
+  interp alias $interp pwd {} ::dofilecheck::pwdCommand
   $interp eval {proc quietly {args} { uplevel 1 $args }}
   if {[catch {runFile $path} message options]} {
     set errorCode [dict get $options -errorcode]
@@ -139,7 +242,7 @@ proc ::dofilecheck::main {path} {
 
 fconfigure stdout -encoding utf-8 -translation lf -buffering line
 fconfigure stdin -encoding utf-8 -translation lf
-::dofilecheck::main [lindex $argv 0]
+::dofilecheck::main [lindex $argv 0] [lindex $argv 1]
 `;
 
 export const vhdlStandards = ['87', '93', '2002', '2008', '2019'] as const;
@@ -215,7 +318,7 @@ export async function runDoFile(options: RunDoFileOptions): Promise<DoFileRun> {
 
 function runStubs(options: RunDoFileOptions, stubs: string): Promise<DoFileRun> {
   return new Promise((resolve, reject) => {
-    const child = spawn(options.tclshExecutable, [stubs, options.doFile], { cwd: options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(options.tclshExecutable, [stubs, options.doFile, options.cwd], { cwd: options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     const steps: DoFileStep[] = [];
     const errors: DoFileError[] = [];
     const decoder = new StringDecoder('utf8');

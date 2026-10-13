@@ -1,0 +1,1 @@
+-- Register file for the glob fixture.
